@@ -69,25 +69,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(node)) => {
-                if getnodename(&node) == "namespace" {
-                    handle_namespace(&node, &mut current_ns_key, &mut current_text_content);
-                } else if getnodename(&node) == "title" {
-                    handle_page(&node, &mut current_page_title, &mut current_text_content);
+                match getnodename(&node).as_str() {
+                    "namespace" => handle_namespace(&node, &mut current_ns_key, &mut current_text_content),
+                    "title" => handle_page(&node, &mut current_page_title, &mut current_text_content),
+                    _ => {}
                 }
             },
             Ok(Event::Empty(node)) => {
-                if getnodename(&node) == "namespace" {
-                    handle_namespace(&node, &mut current_ns_key, &mut current_text_content);
-                    print_namespace(&mut current_ns_key, &mut current_text_content); // Print for empty namespace
+                match getnodename(&node).as_str() {
+                    "namespace" => {
+                        handle_namespace(&node, &mut current_ns_key, &mut current_text_content);
+                        print_namespace(&mut current_ns_key, &mut current_text_content); // Print for empty namespace
+                    },
+                    _ => {}
                 }
             },
             Ok(Event::End(node)) => {
-                if getnodenameend(&node) == "namespace" {
-                    print_namespace(&mut current_ns_key, &mut current_text_content); // Print for end of namespace
-                } else if getnodenameend(&node) == "title" {
-                    print_page(&mut current_text_content); // Print for end of page
+                match getnodenameend(&node).as_str() {
+                    "namespace" => print_namespace(&mut current_ns_key, &mut current_text_content), // Print for end of namespace
+                    "title" => print_page(&mut current_text_content), // Print for end of page
+                    _ => {}
                 }
-            }
+            },
             Ok(Event::Text(text)) => {
                 // Capture text content for the namespace
                 if let Some(ref mut t) = current_text_content {
