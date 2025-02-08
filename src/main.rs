@@ -1,30 +1,51 @@
-use std::collections::HashMap;
 use std::error::Error;
+use std::io::BufReader;
+use std::fs::File;
 
-use quick_xml::events::{Event, BytesStart};
+use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 
-use std::io::{self, BufRead, Write};
+use std::io;
 
-fn print_namespaces(node: BytesStart) {
-    let mut key: Option<String> = None;
-    let mut text: Option<String> = None;
+fn getnodename(node: &quick_xml::events::BytesStart) -> String {
+    String::from_utf8(node.name().0.to_vec()).unwrap()
+}
+fn getnodenameend(node: &quick_xml::events::BytesEnd) -> String {
+    String::from_utf8(node.name().0.to_vec()).unwrap()
+}
 
-    // Extract the key from the attributes
-    for attribute in node.attributes() {
-        let attribute = attribute.unwrap();
-        if attribute.key == quick_xml::name::QName(b"key") {
-            key = Some(String::from_utf8(attribute.value.to_vec()).unwrap());
+fn handle_namespace(node: &quick_xml::events::BytesStart, current_ns_key: &mut Option<String>, current_text_content: &mut Option<String>) {
+    // Capture the key from the attributes
+    for att in node.attributes() {
+        let att = att.unwrap();
+        if att.key == quick_xml::name::QName(b"key") {
+            *current_ns_key = Some(String::from_utf8(att.value.to_vec()).unwrap());
         }
     }
+    // Reset text content for the namespace
+    *current_text_content = None; // Reset for each namespace
+}
 
-    // Extract the text content of the namespace element
-    text = Some(String::from_utf8(node.name().0.to_vec()).unwrap());
-
-    // Print the key and text content together
-    if let (Some(k), Some(t)) = (key, text) {
-        println!("{} : {}", k, t);
+fn print_namespace(current_ns_key: &mut Option<String>, current_text_content: &mut Option<String>) {
+    if let Some(k) = current_ns_key.take() {
+        let ns_text = current_text_content.take().unwrap_or_else(|| String::from("")); // Default to empty string if None
+        println!("namespace {} : \"{}\"", k, ns_text); // Print key and text content (or empty)
     }
+}
+
+fn handle_page(node: &quick_xml::events::BytesStart, current_page_title: &mut Option<String>, current_text_content: &mut Option<String>) {
+    for att in node.attributes() {
+        let att = att.unwrap();
+        if att.key == quick_xml::name::QName(b"title") {
+            *current_page_title = Some(String::from_utf8(att.value.to_vec()).unwrap());
+        }
+    }
+    *current_text_content = None;
+}
+
+fn print_page(current_text_content: &mut Option<String>) {
+    let ns_text = current_text_content.take().unwrap_or_else(|| String::from("")); // Default to empty string if None
+    println!("page \"{}\"", ns_text);
 }
 
 #[tokio::main]
@@ -32,54 +53,53 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Initialize the reader to read from standard input
     let stdin = io::stdin();
     let mut reader = Reader::from_reader(stdin.lock());
+    // let file = File::open("fake.xml")?;
+    // let br = BufReader::new(file);
+    // let mut reader = Reader::from_reader(br);
 
     // Initialize variables to track the path and seen attributes
-    let mut path = Vec::new();
-    let mut current_key: Option<String> = None;
-    let mut current_text: Option<String> = None;
+    let mut current_text_content: Option<String> = None;
+    let mut current_ns_key: Option<String> = None;
+    let mut current_page_title: Option<String> = None;
 
     // Buffer to hold the current event data
     let mut buffer = Vec::new();
-    let mut event_count = 0;
 
     // Main loop to read events from the XML input
     loop {
         match reader.read_event_into(&mut buffer) {
-            Err(error) => break println!("{}", error),
-            Ok(Event::Eof) => break println!("Completed."),
             Ok(Event::Start(node)) => {
-                let node_name = String::from_utf8(node.name().0.to_vec()).unwrap();
-                if node_name == "namespace" {
-                    // Capture the key from the attributes
-                    for attribute in node.attributes() {
-                        let attribute = attribute.unwrap();
-                        if attribute.key == quick_xml::name::QName(b"key") {
-                            current_key = Some(String::from_utf8(attribute.value.to_vec()).unwrap());
-                        }
-                    }
+                if getnodename(&node) == "namespace" {
+                    handle_namespace(&node, &mut current_ns_key, &mut current_text_content);
+                } else if getnodename(&node) == "title" {
+                    handle_page(&node, &mut current_page_title, &mut current_text_content);
                 }
-                path.push(format!("{:?}", node_name));
-                event_count += 1;
-                if event_count >= 100000 {
-                    break println!("Reached 100000 events");
+            },
+            Ok(Event::Empty(node)) => {
+                if getnodename(&node) == "namespace" {
+                    handle_namespace(&node, &mut current_ns_key, &mut current_text_content);
+                    print_namespace(&mut current_ns_key, &mut current_text_content); // Print for empty namespace
+                }
+            },
+            Ok(Event::End(node)) => {
+                if getnodenameend(&node) == "namespace" {
+                    print_namespace(&mut current_ns_key, &mut current_text_content); // Print for end of namespace
+                } else if getnodenameend(&node) == "title" {
+                    print_page(&mut current_text_content); // Print for end of page
                 }
             }
             Ok(Event::Text(text)) => {
-                current_text = Some(String::from_utf8(text.to_vec()).unwrap());
-            }
-            Ok(Event::End(node)) => {
-                let node_name = String::from_utf8(node.name().0.to_vec()).unwrap();
-                if node_name == "namespace" {
-                    if let (Some(k), Some(t)) = (current_key.take(), current_text.take()) {
-                        println!("{} : {}", k, t);
-                    }
+                // Capture text content for the namespace
+                if let Some(ref mut t) = current_text_content {
+                    t.push_str(&String::from_utf8(text.to_vec()).unwrap());
+                } else {
+                    current_text_content = Some(String::from_utf8(text.to_vec()).unwrap());
                 }
-                path.pop();
             }
+            Ok(Event::Eof) => break println!("Completed."),
             Ok(_) => {
-                // Handle other types of XML nodes
-                // println!("Other element");
             }
+            Err(error) => break println!("{}", error),
         }
 
         // Clear the buffer for the next event
