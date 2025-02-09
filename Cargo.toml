@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 quick-xml = { version = "0.28.2" }
+regex = "1.11.1"
 tokio = { version = "1.27.0", features = ["full"] }
