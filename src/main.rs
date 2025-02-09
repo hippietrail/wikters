@@ -101,7 +101,6 @@ fn end_page(page_title: &String, page_ns: Option<i32>, page_id: Option<i32>, pag
         if languages.len() > 0 {
             println!("{} >>> Languages: {}", page_title, languages.join(", "));
         } else {
-            // println!("{} >>> **No languages**: ", page_title);
         }
     }
 }
@@ -157,7 +156,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     last_text_content = Some(s);
                 }
             }
-            // Ok(Event::Eof) => break println!("Completed."),
+            Ok(Event::Eof) => break println!("Completed."),
             Ok(_) => {}
             Err(error) => break println!("{}", error),
         }
