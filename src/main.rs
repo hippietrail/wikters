@@ -11,10 +11,7 @@ fn get_node_name_end(node: &quick_xml::events::BytesEnd) -> String {
     String::from_utf8(node.name().0.to_vec()).unwrap()
 }
 
-fn start_namespace(node: &quick_xml::events::BytesStart,
-    ns_key: &mut Option<i32>,
-    last_text_content: &mut Option<String>)
-{
+fn start_namespace(node: &quick_xml::events::BytesStart, ns_key: &mut Option<i32>, last_text_content: &mut Option<String>) {
     if let Some(att) = node.attributes().find(|a| a.as_ref().unwrap().key == quick_xml::name::QName(b"key")) {
         *ns_key = Some(String::from_utf8(att.unwrap().value.to_vec()).unwrap().parse::<i32>().unwrap());
     }
@@ -27,11 +24,18 @@ fn end_namespace(ns_key: Option<i32>, last_text_content: &Option<String>) {
     println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
 }
 
-fn start_page(page_title: &mut String, page_ns: &mut Option<i32>, page_id: &mut Option<i32>, page_rev_id: &mut Option<i32>) {
+fn start_page(
+    page_title: &mut String,
+    page_ns: &mut Option<i32>,
+    page_id: &mut Option<i32>,
+    page_rev_id: &mut Option<i32>,
+    page_rev_text: &mut String,
+) {
     *page_title = String::new();
     *page_ns = None;
     *page_id = None;
     *page_rev_id = None;
+    *page_rev_text = String::new();
 }
 
 fn start_page_title(last_text_content: &mut Option<String>) {
@@ -67,8 +71,21 @@ fn end_id(page_id: &mut Option<i32>, page_rev_id: &mut Option<i32>, page_rev_con
     }
 }
 
-fn end_page(page_title: &String, page_ns: Option<i32>, page_id: Option<i32>) {
-    println!("page id {} -> {} : \"{}\"", page_id.unwrap(), page_ns.unwrap(), page_title);
+fn start_page_rev_text(last_text_content: &mut Option<String>) {
+    *last_text_content = None;
+}
+
+fn end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<String>) {
+    *page_rev_text = last_text_content.take().unwrap_or_default();
+}
+
+fn end_page(page_title: &String, page_ns: Option<i32>, page_id: Option<i32>, page_rev_id: Option<i32>, page_rev_text: &String) {
+    println!("page page/rev id {}/{} -> {} : \"{}\"", page_id.unwrap(), page_rev_id.unwrap(), page_ns.unwrap(), page_title);
+    if page_ns.unwrap() == 0 {
+        println!("<<<START TEXT>>>");
+        println!("{}", page_rev_text);
+        println!("<<<END TEXT>>>");
+    }
 }
 
 #[tokio::main]
@@ -83,6 +100,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut page_id: Option<i32> = None;
     let mut page_rev_id: Option<i32> = None;
     let mut page_rev_contrib_id: Option<i32> = None;
+    let mut page_rev_text: String = String::new();
 
     let mut buffer = Vec::new();
 
@@ -90,10 +108,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(node)) => match get_node_name(&node).as_str() {
                 "namespace" => start_namespace(&node, &mut ns_key, &mut last_text_content),
-                "page" => start_page(&mut page_title, &mut page_ns, &mut page_id, &mut page_rev_id),
+                "page" => start_page(&mut page_title, &mut page_ns, &mut page_id, &mut page_rev_id, &mut page_rev_text),
                 "title" => start_page_title(&mut last_text_content),
                 "ns" => start_page_ns(&mut last_text_content, &mut page_ns),
                 "id" => start_id(&mut last_text_content),
+                "text" => start_page_rev_text(&mut last_text_content),
                 _ => {}
             },
             Ok(Event::Empty(node)) => match get_node_name(&node).as_str() {
@@ -108,7 +127,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 "title" => end_page_title(&mut page_title, &mut last_text_content),
                 "ns" => end_page_ns(&mut page_ns, &mut last_text_content),
                 "id" => end_id(&mut page_id, &mut page_rev_id, &mut page_rev_contrib_id, &mut last_text_content),
-                "page" => end_page(&page_title, page_ns, page_id),
+                "text" => end_page_rev_text(&mut page_rev_text, &mut last_text_content),
+                "page" => end_page(&page_title, page_ns, page_id, page_rev_id, &page_rev_text),
                 _ => {}
             },
             Ok(Event::Text(text)) => {
