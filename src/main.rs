@@ -2,6 +2,7 @@ use std::error::Error;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use std::io;
+use regex::Regex;
 
 fn get_node_name(node: &quick_xml::events::BytesStart) -> String {
     String::from_utf8(node.name().0.to_vec()).unwrap()
@@ -21,7 +22,7 @@ fn start_namespace(node: &quick_xml::events::BytesStart, ns_key: &mut Option<i32
 fn end_namespace(ns_key: Option<i32>, last_text_content: &Option<String>) {
     // The default namespace, 0, has no name
     let ns_text = last_text_content.as_ref().unwrap_or(&String::from("")).clone();
-    println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
+    // println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
 }
 
 fn start_page(
@@ -80,11 +81,28 @@ fn end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<
 }
 
 fn end_page(page_title: &String, page_ns: Option<i32>, page_id: Option<i32>, page_rev_id: Option<i32>, page_rev_text: &String) {
-    println!("page page/rev id {}/{} -> {} : \"{}\"", page_id.unwrap(), page_rev_id.unwrap(), page_ns.unwrap(), page_title);
+    // println!("page page/rev id {}/{} -> {} : \"{}\"", page_id.unwrap(), page_rev_id.unwrap(), page_ns.unwrap(), page_title);
     if page_ns.unwrap() == 0 {
-        println!("<<<START TEXT>>>");
-        println!("{}", page_rev_text);
-        println!("<<<END TEXT>>>");
+        // Regex to match level-2 headings
+        let heading_regex = Regex::new(r"^== ?([^=]*?) ?==$").unwrap();
+        let mut languages: Vec<String> = Vec::new();
+
+        for line in page_rev_text.lines() {
+            if let Some(captures) = heading_regex.captures(line) {
+                if let Some(heading) = captures.get(1) {
+                    languages.push(heading.as_str().to_string());
+                }
+            }
+        }
+
+        // filter out all languages other than 'English' and 'Translingual'
+        languages.retain(|lang| lang == "English" || lang == "Translingual");
+
+        if languages.len() > 0 {
+            println!("{} >>> Languages: {}", page_title, languages.join(", "));
+        } else {
+            // println!("{} >>> **No languages**: ", page_title);
+        }
     }
 }
 
@@ -139,7 +157,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     last_text_content = Some(s);
                 }
             }
-            Ok(Event::Eof) => break println!("Completed."),
+            // Ok(Event::Eof) => break println!("Completed."),
             Ok(_) => {}
             Err(error) => break println!("{}", error),
         }
