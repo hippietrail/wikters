@@ -14,7 +14,7 @@ fn getnodenameend(node: &quick_xml::events::BytesEnd) -> String {
     String::from_utf8(node.name().0.to_vec()).unwrap()
 }
 
-fn handle_namespace(node: &quick_xml::events::BytesStart, current_ns_key: &mut i32, current_text_content: &mut Option<String>) {
+fn start_siteinfo_namespace(node: &quick_xml::events::BytesStart, current_ns_key: &mut i32, current_text_content: &mut Option<String>) {
     // Capture the key from the attributes
     for att in node.attributes() {
         let att = att.unwrap();
@@ -26,25 +26,51 @@ fn handle_namespace(node: &quick_xml::events::BytesStart, current_ns_key: &mut i
     *current_text_content = None; // Reset for each namespace
 }
 
-fn print_namespace(current_ns_key: &mut i32, current_text_content: &mut Option<String>) {
+fn end_siteinfo_namespace(current_ns_key: &mut i32, current_text_content: &mut Option<String>) {
     let k = current_ns_key;
     let ns_text = current_text_content.take().unwrap_or_else(|| String::from("")); // Default to empty string if None
     println!("namespace {} : \"{}\"", k, ns_text); // Print key and text content (or empty)
 }
 
-fn handle_page(node: &quick_xml::events::BytesStart, current_page_title: &mut Option<String>, current_text_content: &mut Option<String>) {
-    for att in node.attributes() {
-        let att = att.unwrap();
-        if att.key == quick_xml::name::QName(b"title") {
-            *current_page_title = Some(String::from_utf8(att.value.to_vec()).unwrap());
-        }
-    }
+fn start_page_title(node: &quick_xml::events::BytesStart, current_page_title: &mut String, current_text_content: &mut Option<String>) {
+    // for att in node.attributes() {
+    //     let att = att.unwrap();
+    //     if att.key == quick_xml::name::QName(b"title") {
+    //         *current_page_title = String::from_utf8(att.value.to_vec()).unwrap();
+    //     }
+    // }
     *current_text_content = None;
 }
 
-fn print_page(current_text_content: &mut Option<String>) {
-    let ns_text = current_text_content.take().unwrap_or_else(|| String::from("")); // Default to empty string if None
-    println!("page \"{}\"", ns_text);
+fn end_page_title(current_text_content: &mut Option<String>, current_page_title: &mut String) {
+    // let title = current_text_content.take().unwrap_or_else(|| String::from("")); // Default to empty string if None
+    // println!("page_title \"{}\"", title);
+    *current_page_title = current_text_content.take().unwrap();
+}
+
+fn start_page_ns(/*node: &quick_xml::events::BytesStart, */current_page_ns: &mut i32, current_text_content: &mut Option<String>) {
+    // for att in node.attributes() {
+    //     let att = att.unwrap();
+    //     if att.key == quick_xml::name::QName(b"ns") {
+    //         println!("namespace {:?}", att);
+    //         *current_page_ns = String::from_utf8(att.value.to_vec()).unwrap().parse::<i32>().unwrap();
+    //     }
+    // }
+    // let ns_text: String = current_text_content.take().unwrap();
+    // println!("59-> {ns_text}");
+    *current_page_ns = -777;//ns_text.parse::<i32>().unwrap();
+    //*current_page_ns = &current_text_content.unwrap().parse::<i32>().unwrap();
+    *current_text_content = None; // Reset for each namespace
+}
+
+fn end_page_ns(current_text_content: &mut Option<String>, current_page_ns: &mut i32) {
+    let ns_text = current_text_content.take().unwrap();//_or_else(|| String::from("")); // Default to empty string if None
+    // println!("page_ns {}", ns_text); // Print key and text content (or empty)
+    *current_page_ns = ns_text.parse::<i32>().unwrap();
+}
+
+fn end_page(current_page_title: &String, current_page_ns: i32) {
+    println!("page {ns} \"{title}\"", ns = current_page_ns, title = current_page_title);
 }
 
 #[tokio::main]
@@ -58,8 +84,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize variables to track the path and seen attributes
     let mut current_text_content: Option<String> = None;
-    let mut current_ns_key: i32 = 0;
-    let mut current_page_title: Option<String> = None;
+    let mut current_ns_key: i32 = -333;
+    let mut current_page_title: String = Default::default();
+    let mut current_page_ns: i32 = -444;
 
     // Buffer to hold the current event data
     let mut buffer = Vec::new();
@@ -67,20 +94,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(node)) => match getnodename(&node).as_str() {
-                "namespace" => handle_namespace(&node, &mut current_ns_key, &mut current_text_content),
-                "title" => handle_page(&node, &mut current_page_title, &mut current_text_content),
+                "namespace" => start_siteinfo_namespace(&node, &mut current_ns_key, &mut current_text_content),
+                "title" => start_page_title(&node, &mut current_page_title, &mut current_text_content),
+                "ns" => start_page_ns(/*&node, */&mut current_page_ns, &mut current_text_content),
                 _ => {}
             },
             Ok(Event::Empty(node)) => match getnodename(&node).as_str() {
                 "namespace" => {
-                    handle_namespace(&node, &mut current_ns_key, &mut current_text_content);
-                    print_namespace(&mut current_ns_key, &mut current_text_content);
+                    start_siteinfo_namespace(&node, &mut current_ns_key, &mut current_text_content);
+                    end_siteinfo_namespace(&mut current_ns_key, &mut current_text_content);
                 },
                 _ => {}
             },
             Ok(Event::End(node)) => match getnodenameend(&node).as_str() {
-                "namespace" => print_namespace(&mut current_ns_key, &mut current_text_content),
-                "title" => print_page(&mut current_text_content),
+                "namespace" => end_siteinfo_namespace(&mut current_ns_key, &mut current_text_content),
+                "title" => end_page_title(&mut current_text_content, &mut current_page_title),
+                "ns" => end_page_ns(&mut current_text_content, &mut current_page_ns),
+                "page" => end_page(&current_page_title, current_page_ns),
                 _ => {}
             },
             Ok(Event::Text(text)) => {
