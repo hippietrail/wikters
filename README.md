@@ -1,5 +1,7 @@
 # Wikters
 
+![Wikters Logo](wikters-logo.jpeg)
+
 Wikters is a Rust project designed to read and process MediaWiki XML dumps specifically from the **English Wiktionary**. The project aims to efficiently parse and analyze the data stream, extracting relevant information from the pages.
 
 It goes beyond the XML format to parse the wikitext format. Currently extracting just the language headings for pages that contain either or both English and "Translingual" sections.
