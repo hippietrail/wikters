@@ -31,6 +31,24 @@ rain cats and dogs >>> Languages: English
 - Outputs the names of all pages in the Wiktionary dump that include either an English or Translingual section, indicating which of the two languages are covered.
 - Only deals with the main, definition namespace.
 
+## Getting the English Wiktionary XML Dump
+
+To obtain the English Wiktionary XML dump file, visit the following webpage: [Wikimedia Downloads](https://dumps.wikimedia.org/backup-index.html). Look in the huge list for the `enwiktionary` entry, which looks like this:
+> 2025-02-08 05:12:28 [enwiktionary](https://dumps.wikimedia.org/enwiktionary/20250201): Dump complete
+
+Follow its link, currently [https://dumps.wikimedia.org/enwiktionary/20250201](https://dumps.wikimedia.org/enwiktionary/20250201). 
+
+From there, find the `pages-articles` dump file link, currently [https://dumps.wikimedia.org/enwiktionary/20250201/enwiktionary-20250201-pages-articles.xml.bz2](https://dumps.wikimedia.org/enwiktionary/20250201/enwiktionary-20250201-pages-articles.xml.bz2). The current file is 1.3GB in bzip2 format.
+
+(The multistream versions should also work but are slightly larger, currently 1.6GB.)
+
+If you find that a new dump is in progress and these links are grayed out, there will be a link to the previous dump, allowing you to get a slightly older version of the file. For example:
+> [Last dumped on 2025-01-20](https://dumps.wikimedia.org/enwiktionary/20250120/)
+
+There is also a ["Index of /enwiktionary/latest/"](https://dumps.wikimedia.org/enwiktionary/latest/) page with a different format that is just a straight list of links to the individual dump files.
+
+The dumps are updated on the 1st and 20th of every month.
+
 ## Installation
 
 To get started with Wikters, clone the repository and build the project:
@@ -43,16 +61,17 @@ cargo build
 
 ## Usage
 
-Wikters reads from `stdin`. To run the project and parse a MediaWiki XML dump, you can use one of the following commands:
+Wikters reads from `stdin`. To run the project and parse a MediaWiki XML dump, you can use the following command:
 
-- Using `cat` to pipe an XML dump:
-  ```bash
-  cat <path-to-xml-file> | cargo run
-  ```
-
-- Using `bzcat` to decompress directly from a bzip2 compressed XML dump file:
+- Use `bzcat` to decompress directly from a bzip2 compressed XML dump file through a pipe:
   ```bash
   bzcat <path-to-xml-file.bz2> | cargo run
+  ```
+If you have plenty of storage you can decompress the `.bz2` file first into an `.xml` file and it might run slightly faster. In that case:
+
+- Use `cat` to pipe the raw XML dump:
+  ```bash
+  cat <path-to-xml-file> | cargo run
   ```
 
 Note that each language Wiktionary may implement its own format and as such Wikters only supports the English Wiktionary.
