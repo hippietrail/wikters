@@ -111,7 +111,7 @@ fn end_page(title: &String, namespace: Option<i32>, page_id: Option<i32>, rev_id
         for (i, section) in splitted.iter().enumerate().skip(1) {
             *section_num += 1;
 
-            let mut section_xml = format!("    <s num=\"{}\" lang=\"{}\">", section_num, languages[i-1]);
+            let mut section_xml = format!("    <s n=\"{}\" l=\"{}\">", section_num, languages[i-1]);
             let mut inner_section = *section;
 
             if let Some(heading) = all_lang_headings_regex.find(section) {
@@ -131,36 +131,94 @@ fn end_page(title: &String, namespace: Option<i32>, page_id: Option<i32>, rev_id
             }
 
             let heading_blacklist = [
+                // "Abbreviations", // keep for now
+                "Additional notes",
+                "Alternative pronunciation", "Alternative Pronunciation",
+                "Alternative spellings",
                 "Anagrams",
                 "Antonyms",
+                "Attestations",
+                "Circumfix",
                 "Collocations",
+                "Combining forms", "Combining form",
+                "Comeronyms",
+                "Common nouns",
+                "Composition",
                 "Conjugation",
+                // "Contraction", // keep for now
                 "Coordinate terms",
-                "Derived characters",
+                "Cuneiform sign",
+                "Declension",
+                "Derivations",
+                "Derivative words",
+                "Derived characters", "Derived Characters",
+                "Derived forms",
+                "Derived glyphs",
+                "Derived signs",
                 "Derived terms",
+                "Derived words",
                 "Descendants",
+                "Description",
+                "Design",
+                "Determiner", // keep for now
+                "Diacritic",
+                "Diacritical mark",
+                "Dialects",
                 // "Etymology", // keep because there can be multiple
+                "Example", "Examples",
+                "External links",
+                "Formation",
+                "Forms",
                 "Further reading",
                 "Gallery",
+                "Glyph origin",
                 "Han character",
+                "Historical notes",
                 "Holonyms",
                 "Hypernyms",
                 "Hyponyms",
+                "Idiom",
+                "Interfix",
+                "Infix",
                 "Letter",
+                "Ligature",
+                "Links",
                 "Meronyms",
+                "Multiple parts of speech",
+                "Note", "Notes",
                 "Number",
+                "Numeral",
+                "Origin",
+                "Other names",
+                "Parasynonyms",
+                "Paronyms",
+                // "Particle", // keep for now
                 "Phrase",
-                "Pronunciation",
+                // "Prefix", // keep for now
+                // "Prepositional phrase", // keep for now
+                "Production",
+                "Pron",
+                // "Pronunciation", // keep because homophones are in here
+                "Pronunciation notes",
+                // "Proper nouns", // not sure about this one
+                // "Proverb", // not sure about this one
+                "Punctuation mark",
                 "Quotations",
                 "References",
                 "Related characters",
+                "Related forms",
+                "Related symbols",
                 "Related terms",
                 "See also",
                 "Statistics",
+                // "Suffix", // keep for now
                 "Symbol",
+                "Symbol origin",
+                "Symbols",
                 "Synonyms",
                 "Translations",
                 "Trivia",
+                "Troponyms",
                 "Unrelated terms",
                 "Usage notes",
             ];
@@ -216,7 +274,11 @@ fn end_page(title: &String, namespace: Option<i32>, page_id: Option<i32>, rev_id
 fn emit_update(headings_seen: &HashMap<String, u64>) {
     println!("  <update>");
     let mut sorted_headings: Vec<_> = headings_seen.iter().collect();
-    sorted_headings.sort_by(|a, b| b.1.cmp(a.1));
+    // sorted_headings.sort_by(|a, b| b.1.cmp(a.1));
+    // instead of sorting only by descending count, sort first by that then by ascending string when counts are equal
+    sorted_headings.sort_by(|a, b| 
+        b.1.cmp(a.1)
+        .then_with(|| a.0.cmp(b.0)));
     
     for (heading, count) in sorted_headings {
         println!("    <h n=\"{}\" c=\"{}\"/>", heading, count);
@@ -287,7 +349,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     last_text_content = Some(s);
                 }
             }
-            Ok(Event::Eof) => {}
+            Ok(Event::Eof) => { break }
             Ok(_) => {}
             Err(error) => break //println!("{}", error),
         }
