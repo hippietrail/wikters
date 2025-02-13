@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::io;
+
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
-use std::io;
 use regex::Regex;
+
+mod heading_lists;
+use heading_lists::{HEADING_WHITELIST, HEADING_BLACKLIST};
 
 fn get_node_name(node: &quick_xml::events::BytesStart) -> String {
     String::from_utf8(node.name().0.to_vec()).unwrap()
@@ -20,9 +24,9 @@ fn start_namespace(node: &quick_xml::events::BytesStart, ns_key: &mut Option<i32
     *last_text_content = None; // Reset for each namespace
 }
 
-fn end_namespace(ns_key: Option<i32>, last_text_content: &Option<String>) {
+fn end_namespace(_ns_key: Option<i32>, last_text_content: &Option<String>) {
     // The default namespace, 0, has no name
-    let ns_text = last_text_content.as_ref().unwrap_or(&String::from("")).clone();
+    let _ns_text = last_text_content.as_ref().unwrap_or(&String::from("")).clone();
     // println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
 }
 
@@ -119,111 +123,20 @@ fn end_page(title: &String, namespace: Option<i32>, page_id: Option<i32>, rev_id
             }
             // let chosen_stuff = inner_section;
 
-            let all_headings_regex = Regex::new(r"(?m)^(===+) ?([^=]*?) ?===+ *$\n").unwrap();
-            let mut headings: Vec<(String, u8)> = Vec::new();
+            // let mut headings = get_all_headings(inner_section);
 
-            for capture in all_headings_regex.captures_iter(inner_section) {
-                let heading_depth = capture.get(1).unwrap().as_str().len();
-                let heading_name = capture.get(2).unwrap();
-                let name_string = heading_name.as_str().to_string();
+            // headings.retain(|heading| !HEADING_BLACKLIST.contains(&heading.0.as_str()));
 
-                headings.push((name_string, heading_depth.try_into().unwrap()));
-            }
+            let all_headings = get_all_headings(inner_section);
 
-            let heading_blacklist = [
-                // "Abbreviations", // keep for now
-                "Additional notes",
-                "Alternative pronunciation", "Alternative Pronunciation",
-                "Alternative spellings",
-                "Anagrams",
-                "Antonyms",
-                "Attestations",
-                "Circumfix",
-                "Collocations",
-                "Combining forms", "Combining form",
-                "Comeronyms",
-                "Common nouns",
-                "Composition",
-                "Conjugation",
-                // "Contraction", // keep for now
-                "Coordinate terms",
-                "Cuneiform sign",
-                "Declension",
-                "Derivations",
-                "Derivative words",
-                "Derived characters", "Derived Characters",
-                "Derived forms",
-                "Derived glyphs",
-                "Derived signs",
-                "Derived terms",
-                "Derived words",
-                "Descendants",
-                "Description",
-                "Design",
-                "Determiner", // keep for now
-                "Diacritic",
-                "Diacritical mark",
-                "Dialects",
-                // "Etymology", // keep because there can be multiple
-                "Example", "Examples",
-                "External links",
-                "Formation",
-                "Forms",
-                "Further reading",
-                "Gallery",
-                "Glyph origin",
-                "Han character",
-                "Historical notes",
-                "Holonyms",
-                "Hypernyms",
-                "Hyponyms",
-                "Idiom",
-                "Interfix",
-                "Infix",
-                "Letter",
-                "Ligature",
-                "Links",
-                "Meronyms",
-                "Multiple parts of speech",
-                "Note", "Notes",
-                "Number",
-                "Numeral",
-                "Origin",
-                "Other names",
-                "Parasynonyms",
-                "Paronyms",
-                // "Particle", // keep for now
-                "Phrase",
-                // "Prefix", // keep for now
-                // "Prepositional phrase", // keep for now
-                "Production",
-                "Pron",
-                // "Pronunciation", // keep because homophones are in here
-                "Pronunciation notes",
-                // "Proper nouns", // not sure about this one
-                // "Proverb", // not sure about this one
-                "Punctuation mark",
-                "Quotations",
-                "References",
-                "Related characters",
-                "Related forms",
-                "Related symbols",
-                "Related terms",
-                "See also",
-                "Statistics",
-                // "Suffix", // keep for now
-                "Symbol",
-                "Symbol origin",
-                "Symbols",
-                "Synonyms",
-                "Translations",
-                "Trivia",
-                "Troponyms",
-                "Unrelated terms",
-                "Usage notes",
-            ];
+            // headings.retain(|heading| !HEADING_BLACKLIST.contains(&heading.0.as_str()));
+            let nonblack_headings = all_headings
+                .iter()
+                .filter(|heading| !HEADING_BLACKLIST.contains(&heading.0.as_str()))
+                .collect::<Vec<_>>();
 
-            headings.retain(|heading| !heading_blacklist.contains(&heading.0.as_str()));
+            // TODO
+            let headings = nonblack_headings;
 
             if headings.len() > 0 {
                 let chosen_stuff = "\n".to_owned() + &headings
@@ -238,9 +151,7 @@ fn end_page(title: &String, namespace: Option<i32>, page_id: Option<i32>, rev_id
                 }
 
                 section_xml += "\n";
-                section_xml += &format!("      <x>{}{}</x>",
-                    "", //lang_headings[i-1],
-                    chosen_stuff);
+                section_xml += &format!("      <x>{}</x>", chosen_stuff);
                 section_xml += "\n";
                 section_xml += "    </s>";
 
@@ -271,11 +182,23 @@ fn end_page(title: &String, namespace: Option<i32>, page_id: Option<i32>, rev_id
     }
 }
 
+fn get_all_headings(inner_section: &str) -> Vec<(String, u8)> {
+    let all_headings_regex = Regex::new(r"(?m)^(===+) ?([^=]*?) ?===+ *$\n").unwrap();
+    let mut headings: Vec<(String, u8)> = Vec::new();
+
+    for capture in all_headings_regex.captures_iter(inner_section) {
+        let heading_depth = capture.get(1).unwrap().as_str().len();
+        let heading_name = capture.get(2).unwrap();
+        let name_string = heading_name.as_str().to_string();
+
+        headings.push((name_string, heading_depth.try_into().unwrap()));
+    }
+    headings
+}
+
 fn emit_update(headings_seen: &HashMap<String, u64>) {
     println!("  <update>");
     let mut sorted_headings: Vec<_> = headings_seen.iter().collect();
-    // sorted_headings.sort_by(|a, b| b.1.cmp(a.1));
-    // instead of sorting only by descending count, sort first by that then by ascending string when counts are equal
     sorted_headings.sort_by(|a, b| 
         b.1.cmp(a.1)
         .then_with(|| a.0.cmp(b.0)));
@@ -351,7 +274,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             Ok(Event::Eof) => { break }
             Ok(_) => {}
-            Err(error) => break //println!("{}", error),
+            Err(_error) => break //println!("{}", error),
         }
 
         // Clear the buffer for the next event
