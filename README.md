@@ -8,22 +8,47 @@ It goes beyond the XML format to parse the wikitext format. Currently extracting
 
 The output will be in this form:
 ```
-dictionary >>> Languages: English
-free >>> Languages: English
-thesaurus >>> Languages: English
-encyclopedia >>> Languages: English
-portmanteau >>> Languages: English
-encyclopaedia >>> Languages: English
-cat >>> Languages: Translingual, English
-gratis >>> Languages: English
-word >>> Languages: English
-livre >>> Languages: English
-book >>> Languages: English
-pound >>> Languages: English
-GDP >>> Languages: English
-rain cats and dogs >>> Languages: English
+encyclopaedia
+  English
+  Etymology
+  Pronunciation
+  Noun
+
+cat
+  English
+  Pronunciation
+  Etymology 1
+    Alternative forms
+    Noun
+    Verb
+  Etymology 2
+    Noun
+    Verb
+  Etymology 3
+    Noun
+    Adjective
 ```
 
+Or if you specify `-x=true` on the commandline it will output a lightweight XML format:
+```xml
+  <p n="7" pid="36" rid="83729202">
+    <t>cat</t>
+    <s n="8" l="English">
+      <x>
+          Pronunciation
+          Etymology 1
+            Alternative forms
+            Noun
+            Verb
+          Etymology 2
+            Noun
+            Verb
+          Etymology 3
+            Noun
+            Adjective</x>
+    </s>
+  </p>
+```
 ## Features
 
 - Parses XML data structured according to the MediaWiki export format.
