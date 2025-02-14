@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::io;
 
-use clap::{Command, Arg};   
+use clap::Parser;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use regex::Regex;
@@ -10,21 +10,17 @@ use regex::Regex;
 mod heading_lists;
 use heading_lists::{HEADING_WHITELIST, HEADING_BLACKLIST};
 
+#[derive(Debug, Parser)]
+#[command(version, about)]
+struct Args {
+    #[clap(short, long, action = clap::ArgAction::SetTrue)]
+    xml: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let matches = Command::new("Wiktionary Parser")
-        .version("1.0")
-        .author("Your Name <your.email@example.com>")
-        .about("Parses Wiktionary XML")
-        .arg(Arg::new("xml")
-            .short('x')
-            .long("xml")
-            .action(clap::ArgAction::Set) // Change this line
-            .default_value("false") // Add a default value
-            .help("Output in XML format"))        .get_matches();
-    // println!("###{:?}###", matches);
-    let output_xml = matches.get_one::<String>("xml").map(|v| v.as_str()).unwrap_or("false") == "true";
-    // println!("*** output_xml ? *** {} ***", output_xml);
+    let args = Args::parse();
+    let output_xml = args.xml;
 
     let stdin = io::stdin();
     let mut reader = Reader::from_reader(stdin.lock());
@@ -173,7 +169,7 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
                 .filter(|heading| !HEADING_BLACKLIST.contains(&heading.0.as_str()))
                 .collect::<Vec<_>>();
 
-            // TODO
+            // TODO: handle whitelist and keep track of white, grey, and black counts
             let headings = nonblack_headings;
 
             let depth: i32 = if output_xml { 2 } else { -2 };
@@ -181,16 +177,14 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
             if headings.len() > 0 {
                 let chosen_stuff = "\n".to_owned() + &headings
                     .iter()
-                    .map(|heading| format!("{:width$}{}",
-                        "",
-                        heading.0,
-                        // width = heading.1 as usize * 2 + 2
-                        width = (heading.1 as i32 + depth) as usize * 2
+                    .map(|h| format!("{:width$}{}",
+                        "", h.0, width = (h.1 as i32 * 2 + depth) as usize
                     ))
                     .collect::<Vec<String>>()
                     .join("\n");
 
                 // update seen heading count
+                // TODO update seen white, grey, and black headings
                 for heading in &headings {
                     *headings_seen.entry(heading.0.clone()).or_insert(0) += 1;
                 }

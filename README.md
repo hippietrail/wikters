@@ -29,7 +29,7 @@ cat
     Adjective
 ```
 
-Or if you specify `-x=true` on the commandline it will output a lightweight XML format:
+Or if you specify `-x` on the commandline it will output a lightweight XML format:
 ```xml
   <p n="7" pid="36" rid="83729202">
     <t>cat</t>
