@@ -17,6 +17,24 @@ struct Args {
     xml: bool,
 }
 
+struct HeadingsSeen {
+    all: HashMap<String, u64>,      // all headings, how it works now
+    white: HashMap<String, u64>,    // headings I specifically want
+    grey: HashMap<String, u64>,     // headings I didn't consider, rare headings, mistakes, etc.
+    black: HashMap<String, u64>,    // headings I specifically don't want
+}
+
+impl HeadingsSeen {
+    fn new() -> Self {
+        HeadingsSeen {
+            all: HashMap::new(),
+            white: HashMap::new(),
+            grey: HashMap::new(),
+            black: HashMap::new(),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
@@ -40,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut section_num: u64 = 0;
 
     // a map of strings (of some kind, &str or string or whatever) to u64 to count how many times we've seen each heading
-    let mut headings_seen: HashMap<String, u64> = HashMap::new();
+    let mut headings_seen = HeadingsSeen::new();
 
     if output_xml {
         println!("<wiktionary>");
@@ -95,7 +113,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if !just_emitted_update {
-        emit_update(output_xml, &headings_seen);
+        emit_update(output_xml, &mut headings_seen);
     }
 
     if output_xml {
@@ -106,7 +124,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: Option<i32>, rev_id: Option<i32>, text: &String,
-        page_num: &mut u64, section_num: &mut u64, just_emitted_update: &mut bool, headings_seen: &mut HashMap<String, u64>) {
+        page_num: &mut u64, section_num: &mut u64, just_emitted_update: &mut bool, headings_seen: &mut HeadingsSeen) {
     if namespace.unwrap() == 0 {
         let all_lang_headings_regex = Regex::new(r"(?m)^== ?([^=]*?) ?== *$\n").unwrap();
         let our_lang_headings_regex = Regex::new(r"(?m)^== ?(English|Translingual) ?== *$\n").unwrap();
@@ -186,7 +204,7 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
                 // update seen heading count
                 // TODO update seen white, grey, and black headings
                 for heading in &headings {
-                    *headings_seen.entry(heading.0.clone()).or_insert(0) += 1;
+                    *headings_seen.all.entry(heading.0.clone()).or_insert(0) += 1;
                 }
 
                 if output_xml {
@@ -217,7 +235,7 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
 
             // every n pages, emit an update
             if *page_num %256 == 0 {
-                emit_update(output_xml, &headings_seen);
+                emit_update(output_xml, headings_seen);
                 *just_emitted_update = true;
             } else {
                 *just_emitted_update = false;
@@ -311,13 +329,13 @@ fn get_all_headings(inner_section: &str) -> Vec<(String, u8)> {
     headings
 }
 
-fn emit_update(output_xml: bool, headings_seen: &HashMap<String, u64>) {
+fn emit_update(output_xml: bool, headings_seen: &mut HeadingsSeen) {
     if output_xml {
         println!("  <update>");
     } else {
         println!("--update--");
     }
-    let mut sorted_headings: Vec<_> = headings_seen.iter().collect();
+    let mut sorted_headings: Vec<_> = headings_seen.all.iter().collect();
     sorted_headings.sort_by(|a, b| 
         b.1.cmp(a.1)
         .then_with(|| a.0.cmp(b.0)));
