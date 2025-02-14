@@ -15,6 +15,8 @@ use heading_lists::{HEADING_WHITELIST, HEADING_BLACKLIST};
 struct Args {
     #[clap(short, long, action = clap::ArgAction::SetTrue)]
     xml: bool,
+    #[clap(short, long)]
+    limit: Option<u64>,
 }
 
 struct HeadingsSeen {
@@ -66,8 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut just_emitted_update = false;
 
-    loop {
-    // while page_num < 3 {
+    while args.limit.map_or(true, |limit| page_num < limit) {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(node)) => match get_node_name(&node).as_str() {
                 "namespace" => start_namespace(&node, &mut ns_key, &mut last_text_content),
