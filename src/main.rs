@@ -20,7 +20,6 @@ struct Args {
 }
 
 struct HeadingsSeen {
-    all: HashMap<String, u64>,      // all headings, how it works now
     white: HashMap<String, u64>,    // headings I specifically want
     grey: HashMap<String, u64>,     // headings I didn't consider, rare headings, mistakes, etc.
     black: HashMap<String, u64>,    // headings I specifically don't want
@@ -29,7 +28,6 @@ struct HeadingsSeen {
 impl HeadingsSeen {
     fn new() -> Self {
         HeadingsSeen {
-            all: HashMap::new(),
             white: HashMap::new(),
             grey: HashMap::new(),
             black: HashMap::new(),
@@ -59,7 +57,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut page_num: u64 = 0;
     let mut section_num: u64 = 0;
 
-    // a map of strings (of some kind, &str or string or whatever) to u64 to count how many times we've seen each heading
     let mut headings_seen = HeadingsSeen::new();
 
     if output_xml {
@@ -134,11 +131,8 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
 
         for capture in all_lang_headings_regex.captures_iter(text) {
             if let (Some(heading), Some(lang)) = (capture.get(0), capture.get(1)) {
-                let heading_string = heading.as_str().to_string();
-                let lang_string = lang.as_str().to_string();
-
-                lang_headings.push(heading_string);
-                languages.push(lang_string);
+                lang_headings.push(heading.as_str().to_string());
+                languages.push(lang.as_str().to_string());
             }
         }
         
@@ -146,13 +140,14 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
 
         if languages.len() == 0 { return }
 
+        // only count pages we don't reject
         *page_num += 1;
 
-        let mut page_output: String = if output_xml {
+        let mut page_output = if output_xml {
             format!("  <p n=\"{}\" pid=\"{}\" rid=\"{}\">\n    <t>{}</t>",
-            page_num, page_id.unwrap(), rev_id.unwrap(), title)
+                page_num, page_id.unwrap(), rev_id.unwrap(), title)
         } else {
-            format!("{}", title)
+            title.clone()
         };
 
         // now split the text by the same regex
@@ -174,39 +169,36 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
             if let Some(heading) = all_lang_headings_regex.find(section) {
                 inner_section = &section[0..heading.start()];
             }
-            // let chosen_stuff = inner_section;
-
-            // let mut headings = get_all_headings(inner_section);
-
-            // headings.retain(|heading| !HEADING_BLACKLIST.contains(&heading.0.as_str()));
 
             let all_headings = get_all_headings(inner_section);
 
-            // headings.retain(|heading| !HEADING_BLACKLIST.contains(&heading.0.as_str()));
-            let nonblack_headings = all_headings
-                .iter()
-                .filter(|heading| !HEADING_BLACKLIST.contains(&heading.0.as_str()))
-                .collect::<Vec<_>>();
 
-            // TODO: handle whitelist and keep track of white, grey, and black counts
-            let headings = nonblack_headings;
+            // start with an empty nonblack_headings
+            let mut nonblack_headings: Vec<(String, u8)> = Vec::new();
 
-            let depth: i32 = if output_xml { 2 } else { -2 };
+            for heading in all_headings {
+                if HEADING_BLACKLIST.contains(&heading.0.as_str()) {
+                    *headings_seen.black.entry(heading.0.clone()).or_insert(0) += 1;
+                } else {
+                    if HEADING_WHITELIST.contains(&heading.0.as_str()) {
+                        *headings_seen.white.entry(heading.0.clone()).or_insert(0) += 1;
+                    } else {
+                        *headings_seen.grey.entry(heading.0.clone()).or_insert(0) += 1;
+                    }
+                    nonblack_headings.push(heading);
+                }
+            }
 
-            if headings.len() > 0 {
-                let chosen_stuff = "\n".to_owned() + &headings
+            if nonblack_headings.len() > 0 {
+                let depth = output_xml as i32 * 4 - 2;
+                
+                let chosen_stuff = "\n".to_owned() + &nonblack_headings
                     .iter()
                     .map(|h| format!("{:width$}{}",
                         "", h.0, width = (h.1 as i32 * 2 + depth) as usize
                     ))
                     .collect::<Vec<String>>()
                     .join("\n");
-
-                // update seen heading count
-                // TODO update seen white, grey, and black headings
-                for heading in &headings {
-                    *headings_seen.all.entry(heading.0.clone()).or_insert(0) += 1;
-                }
 
                 if output_xml {
                     section_output += "\n";
@@ -336,18 +328,41 @@ fn emit_update(output_xml: bool, headings_seen: &mut HeadingsSeen) {
     } else {
         println!("--update--");
     }
-    let mut sorted_headings: Vec<_> = headings_seen.all.iter().collect();
-    sorted_headings.sort_by(|a, b| 
-        b.1.cmp(a.1)
-        .then_with(|| a.0.cmp(b.0)));
-    
-    for (heading, count) in sorted_headings {
-        if output_xml {
-            println!("    <h n=\"{}\" c=\"{}\"/>", heading, count);
-        } else {
-            println!("{}: {}", heading, count);
+
+    let array_of_tuples_of_headings_and_names = [
+        (&headings_seen.white, "white"),
+        (&headings_seen.grey, "grey"),
+        (&headings_seen.black, "black"),
+    ];
+    for (headings, heading_name) in &array_of_tuples_of_headings_and_names {
+        if headings.len() > 0 {
+            if output_xml {
+                println!("    <{}>", heading_name);
+            } else {
+                println!("{}", heading_name);
+            }
+        }
+        let mut headings: Vec<_> = headings.iter().collect();
+        headings.sort_by(|a, b| 
+            b.1.cmp(a.1)
+            .then_with(|| a.0.cmp(b.0)));
+        
+        for (heading, count) in &headings {
+            if output_xml {
+                println!("      <h n=\"{}\" c=\"{}\"/>", heading, count);
+            } else {
+                println!("  {}: {}", heading, count);
+            }
+        }
+        if headings.len() > 0 {
+            if output_xml {
+                println!("    </{}>", heading_name);
+            } else {
+                println!("");
+            }
         }
     }
+    
     if output_xml {
         println!("  </update>");
     } else {
