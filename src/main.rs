@@ -38,7 +38,6 @@ impl HeadingsSeen {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let output_xml = args.xml;
 
     let stdin = io::stdin();
     let mut reader = Reader::from_reader(stdin.lock());
@@ -59,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut headings_seen = HeadingsSeen::new();
 
-    if output_xml {
+    if args.xml {
         println!("<wiktionary>");
     }
 
@@ -89,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 "ns" => end_page_ns(&mut page_ns, &mut last_text_content),
                 "id" => end_id(&mut page_id, &mut page_rev_id, &mut page_rev_contrib_id, &mut last_text_content),
                 "text" => end_page_rev_text(&mut page_rev_text, &mut last_text_content),
-                "page" => end_page(output_xml, &page_title, page_ns, page_id, page_rev_id, &page_rev_text,
+                "page" => end_page(args.xml, &page_title, page_ns, page_id, page_rev_id, &page_rev_text,
                     &mut page_num, &mut section_num, &mut just_emitted_update, &mut headings_seen),
                 _ => {}
             },
@@ -111,10 +110,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if !just_emitted_update {
-        emit_update(output_xml, &mut headings_seen);
+        emit_update(args.xml, &mut headings_seen);
     }
 
-    if output_xml {
+    if args.xml {
         println!("</wiktionary>");
     }
 
@@ -135,7 +134,7 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
                 languages.push(lang.as_str().to_string());
             }
         }
-        
+
         languages.retain(|lang| lang == "English" || lang == "Translingual");
 
         if languages.len() == 0 { return }
@@ -158,12 +157,11 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
         for (i, section) in splitted.iter().enumerate().skip(1) {
             *section_num += 1;
 
-            let mut section_output: String = if output_xml {
-                format!("    <s n=\"{}\" l=\"{}\">", section_num, languages[i-1])
-            } else {
-                format!("  {}", languages[i-1])
+            let mut section_output = match output_xml {
+                true => format!("    <s n=\"{}\" l=\"{}\">", section_num, languages[i-1]),
+                false => format!("  {}", languages[i-1]),
             };
-            
+
             let mut inner_section = *section;
 
             if let Some(heading) = all_lang_headings_regex.find(section) {
@@ -171,7 +169,6 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
             }
 
             let all_headings = get_all_headings(inner_section);
-
 
             // start with an empty nonblack_headings
             let mut nonblack_headings: Vec<(String, u8)> = Vec::new();
@@ -191,7 +188,7 @@ fn end_page(output_xml: bool, title: &String, namespace: Option<i32>, page_id: O
 
             if nonblack_headings.len() > 0 {
                 let depth = output_xml as i32 * 4 - 2;
-                
+
                 let chosen_stuff = "\n".to_owned() + &nonblack_headings
                     .iter()
                     .map(|h| format!("{:width$}{}",
@@ -323,49 +320,43 @@ fn get_all_headings(inner_section: &str) -> Vec<(String, u8)> {
 }
 
 fn emit_update(output_xml: bool, headings_seen: &mut HeadingsSeen) {
-    if output_xml {
-        println!("  <update>");
-    } else {
-        println!("--update--");
+    match output_xml {
+        true => println!("  <update>"),
+        false => println!("--update--"),
     }
 
-    let array_of_tuples_of_headings_and_names = [
+    for (headings, heading_name) in &[
         (&headings_seen.white, "white"),
         (&headings_seen.grey, "grey"),
         (&headings_seen.black, "black"),
-    ];
-    for (headings, heading_name) in &array_of_tuples_of_headings_and_names {
-        if headings.len() > 0 {
-            if output_xml {
-                println!("    <{}>", heading_name);
-            } else {
-                println!("{}", heading_name);
-            }
+    ] {
+        if headings.len() == 0 {
+            continue;
         }
+
         let mut headings: Vec<_> = headings.iter().collect();
-        headings.sort_by(|a, b| 
-            b.1.cmp(a.1)
-            .then_with(|| a.0.cmp(b.0)));
-        
-        for (heading, count) in &headings {
-            if output_xml {
-                println!("      <h n=\"{}\" c=\"{}\"/>", heading, count);
-            } else {
-                println!("  {}: {}", heading, count);
-            }
+        headings.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+
+        match output_xml {
+            true => println!("    <{}>", heading_name),
+            false => println!("  {}", heading_name),
         }
-        if headings.len() > 0 {
-            if output_xml {
-                println!("    </{}>", heading_name);
-            } else {
-                println!("");
-            }
+
+        let fmt = match output_xml {
+            true => |h: &str, c: &u64| format!("      <h n=\"{}\" c=\"{}\"/>", h, c),
+            false => |h: &str, c: &u64| format!("    {}: {}", h, c),
+        };
+
+        println!("{}", headings.iter().map(|(h, c)| fmt(h, c)).collect::<Vec<String>>().join("\n"));
+
+        match output_xml {
+            true => println!("    </{}>", heading_name),
+            false => println!(""),
         }
     }
-    
-    if output_xml {
-        println!("  </update>");
-    } else {
-        println!("");
+
+    match output_xml {
+        true => println!("  </update>"),
+        false => println!(""),
     }
 }
