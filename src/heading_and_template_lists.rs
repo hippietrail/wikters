@@ -126,3 +126,56 @@ pub const HEADING_BLACKLIST: [&str; 85] = [
     "Unrelated terms",
     "Usage notes",
 ];
+
+pub const TEMPLATE_WHITELIST: [&str; 18] = [
+    "alternative spelling of", "alt spelling of",
+    "archaic spelling of",
+    "censored spelling of",
+    "dated spelling of",
+    "deliberate misspelling of",
+    // en-early modern spelling of
+    // filter-avoidance spelling of
+    "informal spelling of",
+    "intentional misspelling of",
+    "less common spelling of",
+    "misconstruction of",
+    "misspelling of",
+    "nonstandard spelling of",
+    "obsolete spelling of",
+    "pronunciation spelling of",
+    "rare spelling of",
+    "standard spelling of",
+    "uncommon spelling of",
+
+    "uncommon form of",
+];
+pub const TEMPLATE_BLACKLIST: [&str; 25] = [
+    "Han char", "Han ref",
+
+    "l", "link",
+    "lb", "label",
+
+    "t-check",
+    "t-needed",
+    "t",
+    "t+",
+    "t+check",
+    "tt",
+    "tt+",
+
+    "anagrams",
+
+    "col2", "col3", "col4",
+
+    "enPR", "IPA",
+
+    "quote-book",
+    "quote-journal",
+    "quote-text",
+
+    "rfe",
+
+    "trans-bottom",
+
+    "wikipedia",
+];

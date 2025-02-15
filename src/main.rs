@@ -7,8 +7,9 @@ use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use regex::Regex;
 
-mod heading_lists;
-use heading_lists::{HEADING_WHITELIST, HEADING_BLACKLIST};
+mod heading_and_template_lists;
+use heading_and_template_lists::{HEADING_WHITELIST, HEADING_BLACKLIST};
+use heading_and_template_lists::{TEMPLATE_WHITELIST, TEMPLATE_BLACKLIST};
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -19,15 +20,15 @@ struct Args {
     limit: Option<u64>,
 }
 
-struct HeadingsSeen {
+struct Seen {
     white: HashMap<String, u64>,    // headings I specifically want
     grey: HashMap<String, u64>,     // headings I didn't consider, rare headings, mistakes, etc.
     black: HashMap<String, u64>,    // headings I specifically don't want
 }
 
-impl HeadingsSeen {
+impl Seen {
     fn new() -> Self {
-        HeadingsSeen {
+        Seen {
             white: HashMap::new(),
             grey: HashMap::new(),
             black: HashMap::new(),
@@ -56,7 +57,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut page_num: u64 = 0;
     let mut section_num: u64 = 0;
 
-    let mut headings_seen = HeadingsSeen::new();
+    let mut headings_seen = Seen::new();
+    let mut templates_seen = Seen::new();
 
     if args.xml {
         println!("<wiktionary>");
@@ -89,7 +91,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 "id" => end_id(&mut page_id, &mut page_rev_id, &mut page_rev_contrib_id, &mut last_text_content),
                 "text" => end_page_rev_text(&mut page_rev_text, &mut last_text_content),
                 "page" => end_page(args.xml, &page_title, page_ns, page_id, page_rev_id, &page_rev_text,
-                    &mut page_num, &mut section_num, &mut just_emitted_update, &mut headings_seen),
+                    &mut page_num, &mut section_num, &mut just_emitted_update, &mut headings_seen, &mut templates_seen),
                 _ => {}
             },
             Ok(Event::Text(text)) => {
@@ -110,7 +112,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if !just_emitted_update {
-        emit_update(args.xml, &mut headings_seen);
+        emit_update(args.xml, &mut headings_seen, &mut templates_seen);
     }
 
     if args.xml {
@@ -121,16 +123,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn end_page(
-    output_xml: bool,                // output format
-    title: &String,                  // page's title from the dump
-    namespace: Option<i32>,          // page's namespace
-    page_id: Option<i32>,            // page's id
-    rev_id: Option<i32>,             // page's revision id (history dumps have many, our dumps have one)
-    pagetext: &String,                   // page text
-    page_num: &mut u64,              // count of chosen pages
-    section_num: &mut u64,           // count of chosen sections (each page may have English, Translingual, or both)
-    just_emitted_update: &mut bool,  // flag so we don't emit the final update if we just emitted one
-    headings_seen: &mut HeadingsSeen // we count how many times we see each heading
+    output_xml: bool,               // output format
+    title: &String,                 // page's title from the dump
+    namespace: Option<i32>,         // page's namespace
+    page_id: Option<i32>,           // page's id
+    rev_id: Option<i32>,            // page's revision id (history dumps have many, our dumps have one)
+    pagetext: &String,              // page text
+    page_num: &mut u64,             // count of chosen pages
+    section_num: &mut u64,          // count of chosen sections (each page may have English, Translingual, or both)
+    just_emitted_update: &mut bool, // flag so we don't emit the final update if we just emitted one
+    headings_seen: &mut Seen,       // we count how many times we see each heading
+    templates_seen: &mut Seen,      // we count how many times we see each template
 ) {
     if namespace.unwrap() == 0 {
         let all_lang_headings_regex = Regex::new(r"(?m)^== ?([^=]*?) ?== *$\n").unwrap();
@@ -152,11 +155,10 @@ fn end_page(
         // only count pages we don't reject
         *page_num += 1;
 
-        let mut page_output = if output_xml {
-            format!("  <p n=\"{}\" pid=\"{}\" rid=\"{}\">\n    <t>{}</t>",
-                page_num, page_id.unwrap(), rev_id.unwrap(), title)
-        } else {
-            title.clone()
+        let mut page_output = match output_xml {
+            true => format!("  <p n=\"{}\" pid=\"{}\" rid=\"{}\">\n    <t>{}</t>",
+                page_num, page_id.unwrap(), rev_id.unwrap(), title),
+            false => title.clone(),
         };
 
         // now split the text by the same regex
@@ -182,7 +184,8 @@ fn end_page(
 
             // let nonblack_headings = categorize_and_count(headings_seen, get_headings_and_templates(langsectext));
             let (headings, templates) = get_headings_and_templates(langsectext);
-            let nonblack_headings = categorize_and_count(headings_seen, headings);
+            // let nonblack_headings = categorize_and_count(headings_seen, headings);
+            let (nonblack_headings, nonblack_templates) = categorize_and_count(headings_seen, headings, templates_seen, templates);
 
             if nonblack_headings.len() > 0 {
                 let depth = output_xml as i32 * 4 - 2;
@@ -207,8 +210,8 @@ fn end_page(
                 }
             }
 
-            if templates.len() > 0 {
-                let chosen_templates = "\n".to_owned() + &templates
+            if nonblack_templates.len() > 0 {
+                let chosen_templates = "\n".to_owned() + &nonblack_templates
                     .iter()
                     .map(|h| format!("        {}: {}", h.0, h.1))
                     .collect::<Vec<String>>()
@@ -242,28 +245,47 @@ fn end_page(
             // every n pages, emit an update
             *just_emitted_update = *page_num % 256 == 0;
             if *just_emitted_update {
-                emit_update(output_xml, headings_seen);
+                emit_update(output_xml, headings_seen, templates_seen);
             }
         }
     }
 }
 
-fn categorize_and_count(seen: &mut HeadingsSeen, headings: Vec<(String, u8)>) -> Vec<(String, u8)> {
+fn categorize_and_count(
+    seen_headings: &mut Seen, headings: Vec<(String, u8)>,
+    seen_templates: &mut Seen, templates: Vec<(String, u8)>
+) -> (Vec<(String, u8)>, Vec<(String, u8)>) {
     let mut nonblack_headings: Vec<(String, u8)> = Vec::new();
 
     for heading in headings {
         if HEADING_BLACKLIST.contains(&heading.0.as_str()) {
-            *seen.black.entry(heading.0.clone()).or_insert(0) += 1;
+            *seen_headings.black.entry(heading.0.clone()).or_insert(0) += 1;
         } else {
             if HEADING_WHITELIST.contains(&heading.0.as_str()) {
-                *seen.white.entry(heading.0.clone()).or_insert(0) += 1;
+                *seen_headings.white.entry(heading.0.clone()).or_insert(0) += 1;
             } else {
-                *seen.grey.entry(heading.0.clone()).or_insert(0) += 1;
+                *seen_headings.grey.entry(heading.0.clone()).or_insert(0) += 1;
             }
             nonblack_headings.push(heading);
         }
     }
-    nonblack_headings
+
+    let mut nonblack_templates: Vec<(String, u8)> = Vec::new();
+
+    for (template, count) in templates {
+        if TEMPLATE_BLACKLIST.contains(&template.as_str()) {
+            *seen_templates.black.entry(template.clone()).or_insert(0) += count as u64;
+        } else {
+            if TEMPLATE_WHITELIST.contains(&template.as_str()) {
+                *seen_templates.white.entry(template.clone()).or_insert(0) += count as u64;
+            } else {
+                *seen_templates.grey.entry(template.clone()).or_insert(0) += count as u64;
+            }
+            nonblack_templates.push((template.clone(), count));
+        }
+    }
+
+    (nonblack_headings, nonblack_templates)
 }
 
 fn get_node_name(node: &quick_xml::events::BytesStart) -> String {
@@ -342,11 +364,9 @@ fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String
     let all_headings_regex = Regex::new(r"(?m)^(===+) ?([^=]*?) ?===+ *$\n").unwrap();
     let mut headings: Vec<(String, u8)> = Vec::new();
 
-    for capture in all_headings_regex.captures_iter(langsect) {
-        let heading_depth = capture.get(1).unwrap().as_str().len();
-        // let heading_name = capture.get(2).unwrap();
-        // let name_string = heading_name.as_str().to_string();
-        let name_string = capture.get(2).unwrap().as_str().to_string();
+    for cap in all_headings_regex.captures_iter(langsect) {
+        let heading_depth = cap.get(1).unwrap().as_str().len();
+        let name_string = cap.get(2).unwrap().as_str().to_string();
 
         headings.push((name_string, heading_depth.try_into().unwrap()));
     }
@@ -354,16 +374,12 @@ fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String
     let all_templates_regex = Regex::new(r"(?m)()\{\{(.*?)(:?\||}})").unwrap();
     let mut templates: Vec<(String, u8)> = Vec::new();
 
-    // make a map to count how many times each template is seen
     let mut seen_map: HashMap<String, u8> = HashMap::new();
 
-    for capture in all_templates_regex.captures_iter(langsect) {
-        let template_name = capture.get(2).unwrap().as_str().to_string();
-
-        // bump count of this template
+    for cap in all_templates_regex.captures_iter(langsect) {
+        let template_name = cap.get(2).unwrap().as_str().to_string();
         let seen_count = seen_map.entry(template_name.clone()).or_insert(0);
         *seen_count += 1;
-        // templates.push((template_name, *seen_count));
     }
 
     for (template_name, count) in seen_map {
@@ -375,38 +391,97 @@ fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String
     (headings, templates)
 }
 
-fn emit_update(output_xml: bool, headings_seen: &mut HeadingsSeen) {
+fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut Seen) {
+    let colours = ["white", "grey", "black"];
+
     match output_xml {
         true => println!("  <update>"),
         false => println!("--update--"),
     }
 
-    for (headings, heading_name) in &[
-        (&headings_seen.white, "white"),
-        (&headings_seen.grey, "grey"),
-        (&headings_seen.black, "black"),
-    ] {
+    if headings_seen.white.len() != 0 || headings_seen.grey.len() != 0 || headings_seen.black.len() != 0 {
+        match output_xml {
+            true => println!("    <headings>"),
+            false => println!("  headings"),
+        }
+    }
+
+    for (index, headings) in [
+        &headings_seen.white, &headings_seen.grey, &headings_seen.black
+    ].iter().enumerate() {
         if headings.len() == 0 {
             continue;
         }
+
+        let heading_name = &colours[index];
 
         let mut headings: Vec<_> = headings.iter().collect();
         headings.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
 
         match output_xml {
-            true => println!("    <{}>", heading_name),
-            false => println!("  {}", heading_name),
+            true => println!("      <{}>", heading_name),
+            false => println!("    {}", heading_name),
         }
 
         let fmt = match output_xml {
-            true => |h: &str, c: &u64| format!("      <h n=\"{}\" c=\"{}\"/>", h, c),
-            false => |h: &str, c: &u64| format!("    {}: {}", h, c),
+            true => |h: &str, c: &u64| format!("        <h n=\"{}\" c=\"{}\"/>", h, c),
+            false => |h: &str, c: &u64| format!("      {}: {}", h, c),
         };
 
         println!("{}", headings.iter().map(|(h, c)| fmt(h, c)).collect::<Vec<String>>().join("\n"));
 
         match output_xml {
-            true => println!("    </{}>", heading_name),
+            true => println!("      </{}>", heading_name),
+            false => println!(""),
+        }
+    }
+
+    if headings_seen.white.len() != 0 || headings_seen.grey.len() != 0 || headings_seen.black.len() != 0 {
+        match output_xml {
+            true => println!("    </headings>"),
+            false => println!(""),
+        }
+    }
+    if templates_seen.white.len() != 0 || templates_seen.grey.len() != 0 || templates_seen.black.len() != 0 {
+        match output_xml {
+            true => println!("    <templates>"),
+            false => println!("  templates"),
+        }
+    }
+
+    for (index, templates) in [
+        &templates_seen.white, &templates_seen.grey, &templates_seen.black
+    ].iter().enumerate() {
+        if templates.len() == 0 {
+            continue;
+        }
+
+        let template_name = &colours[index];
+
+        let mut templates: Vec<_> = templates.iter().collect();
+        templates.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+
+        match output_xml {
+            true => println!("      <{}>", template_name),
+            false => println!("    {}", template_name),
+        }
+
+        let fmt = match output_xml {
+            true => |h: &str, c: &u64| format!("        <t n=\"{}\" c=\"{}\"/>", h, c),
+            false => |h: &str, c: &u64| format!("      {}: {}", h, c),
+        };
+
+        println!("{}", templates.iter().map(|(h, c)| fmt(h, c)).collect::<Vec<String>>().join("\n"));
+
+        match output_xml {
+            true => println!("      </{}>", template_name),
+            false => println!(""),
+        }
+    }
+
+    if templates_seen.white.len() != 0 || templates_seen.grey.len() != 0 || templates_seen.black.len() != 0 {
+        match output_xml {
+            true => println!("    </templates>"),
             false => println!(""),
         }
     }
