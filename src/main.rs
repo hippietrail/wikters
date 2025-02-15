@@ -182,9 +182,7 @@ fn end_page(
                 langsectext = &langsectext[0..heading.start()];
             }
 
-            // let nonblack_headings = categorize_and_count(headings_seen, get_headings_and_templates(langsectext));
             let (headings, templates) = get_headings_and_templates(langsectext);
-            // let nonblack_headings = categorize_and_count(headings_seen, headings);
             let (nonblack_headings, nonblack_templates) = categorize_and_count(headings_seen, headings, templates_seen, templates);
 
             if nonblack_headings.len() > 0 {
