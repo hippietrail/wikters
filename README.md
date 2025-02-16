@@ -52,9 +52,15 @@ Or if you specify `-x` on the commandline it will output a lightweight XML forma
 ## Features
 
 - Parses XML data structured according to the MediaWiki export format.
-- Extracts page titles, IDs, and revision IDs (currently not output).
-- Outputs the names of all pages in the Wiktionary dump that include either an English or Translingual section, indicating which of the two languages are covered.
-- Only deals with the main, definition namespace.
+- For each page that contains either English or Translingual sections, extracts:
+  - Title, ID, and revision ID from the XML.
+  - Headings with their nesting structure, filtered by white and blacklists, with a greylist of headings not specified in either.
+  - Templates with their counts, filtered by white and blacklists, also with a greylist. (Not yet structured)
+
+## Command-Line Options
+
+- `-l`, `--limit <NUM>`: Limit the number of pages outputted to `<NUM>`. This option allows you to specify how many pages you want to output from the processed data.
+- `-x`, `--xml`: Output in lightweight XML format.
 
 ## Getting the English Wiktionary XML Dump
 
