@@ -14,10 +14,13 @@ use heading_and_template_lists::{TEMPLATE_WHITELIST, TEMPLATE_BLACKLIST};
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Args {
-    #[clap(short, long, action = clap::ArgAction::SetTrue)]
-    xml: bool,
+    /// Limit the number of pages output.
     #[clap(short, long)]
     limit: Option<u64>,
+
+    /// Output in lightweight XML format.
+    #[clap(short, long)]
+    xml: bool,
 }
 
 struct Seen {
@@ -135,124 +138,124 @@ fn end_page(
     headings_seen: &mut Seen,       // we count how many times we see each heading
     templates_seen: &mut Seen,      // we count how many times we see each template
 ) {
-    if namespace.unwrap() == 0 {
-        let all_lang_headings_regex = Regex::new(r"(?m)^== ?([^=]*?) ?== *$\n").unwrap();
-        let our_lang_headings_regex = Regex::new(r"(?m)^== ?(English|Translingual) ?== *$\n").unwrap();
-        let mut lang_headings: Vec<String> = Vec::new();
-        let mut languages: Vec<String> = Vec::new();
+    if namespace.unwrap() != 0 { return; }
+    
+    let all_lang_headings_regex = Regex::new(r"(?m)^== ?([^=]*?) ?== *$\n").unwrap();
+    let our_lang_headings_regex = Regex::new(r"(?m)^== ?(English|Translingual) ?== *$\n").unwrap();
+    let mut lang_headings: Vec<String> = Vec::new();
+    let mut languages: Vec<String> = Vec::new();
 
-        for capture in all_lang_headings_regex.captures_iter(pagetext) {
-            if let (Some(heading), Some(lang)) = (capture.get(0), capture.get(1)) {
-                lang_headings.push(heading.as_str().to_string());
-                languages.push(lang.as_str().to_string());
-            }
+    for capture in all_lang_headings_regex.captures_iter(pagetext) {
+        if let (Some(heading), Some(lang)) = (capture.get(0), capture.get(1)) {
+            lang_headings.push(heading.as_str().to_string());
+            languages.push(lang.as_str().to_string());
         }
+    }
 
-        languages.retain(|lang| lang == "English" || lang == "Translingual");
+    languages.retain(|lang| lang == "English" || lang == "Translingual");
 
-        if languages.len() == 0 { return }
+    if languages.len() == 0 { return }
 
-        // only count pages we don't reject
-        *page_num += 1;
+    // only count pages we don't reject
+    *page_num += 1;
 
-        let mut page_output = match output_xml {
-            true => format!("  <p n=\"{}\" pid=\"{}\" rid=\"{}\">\n    <t>{}</t>",
-                page_num, page_id.unwrap(), rev_id.unwrap(), title),
-            false => title.clone(),
+    let mut page_output = match output_xml {
+        true => format!("  <p n=\"{}\" pid=\"{}\" rid=\"{}\">\n    <t>{}</t>",
+            page_num, page_id.unwrap(), rev_id.unwrap(), title),
+        false => title.clone(),
+    };
+
+    // now split the text by the same regex
+    let split_pagetext = our_lang_headings_regex.split(pagetext).collect::<Vec<&str>>();
+
+    let mut sections_output_vec: Vec<String> = Vec::new();
+
+    // skip the prologue before the first heading, usually contains {{also}}
+    for (i, langsectext) in split_pagetext.iter().enumerate().skip(1) {
+        *section_num += 1;
+
+        let mut section_output = match output_xml {
+            true => format!("    <s n=\"{}\" l=\"{}\">", section_num, languages[i-1]),
+            false => format!("  {}", languages[i-1]),
         };
 
-        // now split the text by the same regex
-        let split_pagetext = our_lang_headings_regex.split(pagetext).collect::<Vec<&str>>();
+        // get everything after this heading
+        let mut langsectext = *langsectext;
+        // but keep only up to the next heading
+        if let Some(heading) = all_lang_headings_regex.find(langsectext) {
+            langsectext = &langsectext[0..heading.start()];
+        }
 
-        let mut sections_output_vec: Vec<String> = Vec::new();
+        let (headings, templates) = get_headings_and_templates(langsectext);
+        let (nonblack_headings, white_templates) = categorize_and_count(headings_seen, headings, templates_seen, templates);
 
-        // skip the prologue before the first heading, usually contains {{also}}
-        for (i, langsectext) in split_pagetext.iter().enumerate().skip(1) {
-            *section_num += 1;
+        if nonblack_headings.len() > 0 {
+            let depth = output_xml as i32 * 4 - 2;
 
-            let mut section_output = match output_xml {
-                true => format!("    <s n=\"{}\" l=\"{}\">", section_num, languages[i-1]),
-                false => format!("  {}", languages[i-1]),
-            };
-
-            // get everything after this heading
-            let mut langsectext = *langsectext;
-            // but keep only up to the next heading
-            if let Some(heading) = all_lang_headings_regex.find(langsectext) {
-                langsectext = &langsectext[0..heading.start()];
-            }
-
-            let (headings, templates) = get_headings_and_templates(langsectext);
-            let (nonblack_headings, nonblack_templates) = categorize_and_count(headings_seen, headings, templates_seen, templates);
-
-            if nonblack_headings.len() > 0 {
-                let depth = output_xml as i32 * 4 - 2;
-
-                let chosen_headings = "\n".to_owned() + &nonblack_headings
-                    .iter()
-                    .map(|h| format!("{:width$}{}",
-                        "", h.0, width = (h.1 as i32 * 2 + depth) as usize
-                    ))
-                    .collect::<Vec<String>>()
-                    .join("\n");
-
-                if output_xml {
-                    section_output += "\n";
-                    section_output += &format!("      <x>{}</x>", chosen_headings);
-                } else {
-                    section_output += &format!("{}\n", chosen_headings);
-                }
-
-                if chosen_headings.len() == 0 {
-                    eprintln!("** have headings but no stuff chosen **")
-                }
-            }
-
-            if nonblack_templates.len() > 0 {
-                let chosen_templates = "\n".to_owned() + &nonblack_templates
-                    .iter()
-                    .map(|h| format!("        {}: {}", h.0, h.1))
-                    .collect::<Vec<String>>()
-                    .join("\n");
-
-                if output_xml {
-                    section_output += "\n";
-                    section_output += &format!("      <t>{}</t>", chosen_templates);
-                } else {
-                    section_output += &format!("{}\n", chosen_templates);
-                }
-            }
+            let chosen_headings = "\n".to_owned() + &nonblack_headings
+                .iter()
+                .map(|h| format!("{:width$}{}",
+                    "", h.0, width = (h.1 as i32 * 2 + depth) as usize
+                ))
+                .collect::<Vec<String>>()
+                .join("\n");
 
             if output_xml {
                 section_output += "\n";
-                section_output += "    </s>";
+                section_output += &format!("      <x>{}</x>", chosen_headings);
+            } else {
+                section_output += &format!("{}\n", chosen_headings);
             }
 
-            sections_output_vec.push(section_output);
+            if chosen_headings.len() == 0 {
+                eprintln!("** have headings but no stuff chosen **")
+            }
         }
 
-        if sections_output_vec.len() > 0 {
-            page_output += "\n";
-            page_output += &sections_output_vec.join("\n");
-            if output_xml {
-                page_output += "\n";
-                page_output += "  </p>";
-            }
-            println!("{}", page_output);
+        if white_templates.len() > 0 {
+            let chosen_templates = "\n".to_owned() + &white_templates
+                .iter()
+                .map(|h| format!("        {}: {}", h.0, h.1))
+                .collect::<Vec<String>>()
+                .join("\n");
 
-            // every n pages, emit an update
-            *just_emitted_update = *page_num % 256 == 0;
-            if *just_emitted_update {
-                emit_update(output_xml, headings_seen, templates_seen);
+            if output_xml {
+                section_output += "\n";
+                section_output += &format!("      <t>{}</t>", chosen_templates);
+            } else {
+                section_output += &format!("{}\n", chosen_templates);
             }
+        }
+
+        if output_xml {
+            section_output += "\n";
+            section_output += "    </s>";
+        }
+
+        sections_output_vec.push(section_output);
+    }
+
+    if sections_output_vec.len() > 0 {
+        page_output += "\n";
+        page_output += &sections_output_vec.join("\n");
+        if output_xml {
+            page_output += "\n";
+            page_output += "  </p>";
+        }
+        println!("{}", page_output);
+
+        // every n pages, emit an update
+        *just_emitted_update = *page_num % 256 == 0;
+        if *just_emitted_update {
+            emit_update(output_xml, headings_seen, templates_seen);
         }
     }
 }
 
 fn categorize_and_count(
     seen_headings: &mut Seen, headings: Vec<(String, u8)>,
-    seen_templates: &mut Seen, templates: Vec<(String, u8)>
-) -> (Vec<(String, u8)>, Vec<(String, u8)>) {
+    seen_templates: &mut Seen, templates: Vec<(String, u16)>
+) -> (Vec<(String, u8)>, Vec<(String, u16)>) {
     let mut nonblack_headings: Vec<(String, u8)> = Vec::new();
 
     for heading in headings {
@@ -268,7 +271,7 @@ fn categorize_and_count(
         }
     }
 
-    let mut nonblack_templates: Vec<(String, u8)> = Vec::new();
+    let mut white_templates: Vec<(String, u16)> = Vec::new();
 
     for (template, count) in templates {
         if TEMPLATE_BLACKLIST.contains(&template.as_str()) {
@@ -276,14 +279,14 @@ fn categorize_and_count(
         } else {
             if TEMPLATE_WHITELIST.contains(&template.as_str()) {
                 *seen_templates.white.entry(template.clone()).or_insert(0) += count as u64;
+                white_templates.push((template.clone(), count.into()));
             } else {
                 *seen_templates.grey.entry(template.clone()).or_insert(0) += count as u64;
             }
-            nonblack_templates.push((template.clone(), count));
         }
     }
 
-    (nonblack_headings, nonblack_templates)
+    (nonblack_headings, white_templates)
 }
 
 fn get_node_name(node: &quick_xml::events::BytesStart) -> String {
@@ -357,8 +360,9 @@ fn end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<
     *page_rev_text = last_text_content.take().unwrap_or_default();
 }
 
-// collect all headings and their depths from the text of a language section
-fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String, u8)>) {
+// from the text of a language section, collect all headings and their depths
+// and all templates and their counts
+fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String, u16)>) {
     let all_headings_regex = Regex::new(r"(?m)^(===+) ?([^=]*?) ?===+ *$\n").unwrap();
     let mut headings: Vec<(String, u8)> = Vec::new();
 
@@ -369,13 +373,19 @@ fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String
         headings.push((name_string, heading_depth.try_into().unwrap()));
     }
 
-    let all_templates_regex = Regex::new(r"(?m)()\{\{(.*?)(:?\||}})").unwrap();
-    let mut templates: Vec<(String, u8)> = Vec::new();
+    let all_templates_regex = Regex::new(r"(?m)\{\{([^|}:&]*[|:&])").unwrap();
+    let mut templates: Vec<(String, u16)> = Vec::new();
 
-    let mut seen_map: HashMap<String, u8> = HashMap::new();
+    let mut seen_map: HashMap<String, u16> = HashMap::new();
 
     for cap in all_templates_regex.captures_iter(langsect) {
-        let template_name = cap.get(2).unwrap().as_str().to_string();
+        let mut template_name = cap.get(1).unwrap().as_str().to_string();
+        let lc = template_name.chars().last().unwrap();
+        // starts with &lt; if the template contains an html comment
+        if ['|', '&'].contains(&lc) {
+            template_name.pop();
+            template_name = template_name.trim_end().to_string();
+        }
         let seen_count = seen_map.entry(template_name.clone()).or_insert(0);
         *seen_count += 1;
     }
