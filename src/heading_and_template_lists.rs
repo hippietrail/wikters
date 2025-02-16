@@ -127,7 +127,7 @@ pub const HEADING_BLACKLIST: [&str; 85] = [
     "Usage notes",
 ];
 
-pub const TEMPLATE_WHITELIST: [&str; 18] = [
+pub const TEMPLATE_WHITELIST: [&str; 38] = [
     "alternative spelling of", "alt spelling of",
     "archaic spelling of",
     "censored spelling of",
@@ -147,9 +147,60 @@ pub const TEMPLATE_WHITELIST: [&str; 18] = [
     "standard spelling of",
     "uncommon spelling of",
 
+    "alternative case form of",
+    "alternative form of",
+    "archaic form of",
+    "obsolete form of",
     "uncommon form of",
+
+    "alt form",
+    "alt sp",
+
+    "alt", "alter",
+
+    "abbreviation of",
+    "abbr of",
+    "acronym of",
+    "infl of",
+    "initialism of",
+    "init of",
+    "past participle of",
+    "plural of",
+    "synonym of",
+    "syn of",
+
+    "en-comparative of",
+    "en-superlative of",
 ];
-pub const TEMPLATE_BLACKLIST: [&str; 25] = [
+// grey templates
+// --------------
+// head
+// en-adj
+// en-adv
+// en-interj
+// en-noun
+// en-PP
+// en-pref
+// en-proper noun
+// en-proper-noun
+// en-prop
+// en-verb
+//
+// prefix
+// suffix
+//
+// af
+// compound
+// der
+// given name
+// place
+// q
+// qualifier
+// sense
+// surname
+// syn
+// synonyms
+pub const TEMPLATE_BLACKLIST: [&str; 68] = [
     "Han char", "Han ref",
 
     "l", "link",
@@ -163,19 +214,42 @@ pub const TEMPLATE_BLACKLIST: [&str; 25] = [
     "tt",
     "tt+",
 
+    "...",
     "anagrams",
-
-    "col2", "col3", "col4",
-
-    "enPR", "IPA",
-
-    "quote-book",
+    "audio",
+    "bor",
+    "C", "topics", "c",
+    "cite-book",
+    "cln", "catlangname",
+    "cog",
+    "col", "col2", "col3", "col4",
+    "comcatlite",
+    "enPR",
+    "etystub",
+    "inh",
+    "IPA", "IPAchar",
+    "m", "mention",
+    "multiple image", "multiple images",
+    "nbsp",
+    "pedia",
+    "quote-book", "quote-book ",
+    "quote-gloss",
     "quote-journal",
     "quote-text",
-
+    "quote-web",
     "rfe",
+    "rhymes",
+    "seeCites",
+    "specieslite",
+    "taxlink", "taxfmt", "taxoninfl", "taxon",
+    "trans-top", "trans-bottom", "trans-see", "trans-top-also",
+    "ux",
+    "vern",
+    "was wotd",
+    "wikipedia", "w", "wp",
+    "wikispecies",
 
-    "trans-bottom",
-
-    "wikipedia",
+    "R:",
+    "RQ:",
+    "U:",
 ];
