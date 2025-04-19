@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::io;
+use std::io::{self, StdinLock};
 
 use clap::Parser;
 use quick_xml::events::Event;
@@ -37,6 +37,42 @@ struct Args {
     sample_rate: Option<u64>,
 }
 
+struct Page {
+    title: String,
+    ns: Option<i32>,
+    id: Option<i32>,
+    rev_id: Option<i32>,
+    rev_contrib_id: Option<i32>,
+    rev_text: String,
+}
+
+impl Page {
+    fn new() -> Self {
+        Page {
+            title: String::new(),
+            ns: None,
+            id: None,
+            rev_id: None,
+            rev_contrib_id: None,
+            rev_text: String::new(),
+        }
+    }
+}
+
+struct State {
+    last_text_content: Option<String>,
+    ns_key: Option<i32>,
+    page: Page,
+
+    page_num: u64,
+    section_num: u64,
+
+    headings_seen: Seen,
+    templates_seen: Seen,
+
+    just_emitted_update: bool,
+}
+
 struct Seen {
     white: HashMap<String, u64>, // headings I specifically want
     grey: HashMap<String, u64>,  // headings I didn't consider, rare headings, mistakes, etc.
@@ -58,100 +94,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     let stdin = io::stdin();
-    let mut reader = Reader::from_reader(stdin.lock());
 
-    let mut last_text_content: Option<String> = None;
-    let mut ns_key: Option<i32> = None;
-    let mut page_title: String = String::new();
-    let mut page_ns: Option<i32> = None;
-    let mut page_id: Option<i32> = None;
-    let mut page_rev_id: Option<i32> = None;
-    let mut page_rev_contrib_id: Option<i32> = None;
-    let mut page_rev_text: String = String::new();
-
-    let mut buffer = Vec::new();
-
-    let mut page_num: u64 = 0;
-    let mut section_num: u64 = 0;
-
-    let mut headings_seen = Seen::new();
-    let mut templates_seen = Seen::new();
+    let mut state = State {
+        last_text_content: None,
+        ns_key: None,
+        page: Page::new(),
+        page_num: 0,
+        section_num: 0,
+        headings_seen: Seen::new(),
+        templates_seen: Seen::new(),
+        just_emitted_update: false,
+    };
 
     if args.xml {
         println!("<wiktionary>");
     }
 
-    let mut just_emitted_update = false;
+    let mut qx_reader = Reader::from_reader(stdin.lock());
+    let mut qx_buffer = Vec::new();
 
-    while args.limit.is_none_or(|limit| page_num < limit) {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(node)) => match get_node_name(&node).as_str() {
-                "namespace" => start_namespace(&node, &mut ns_key, &mut last_text_content),
-                "page" => start_page(
-                    &mut page_title,
-                    &mut page_ns,
-                    &mut page_id,
-                    &mut page_rev_id,
-                    &mut page_rev_text,
-                ),
-                "title" => start_page_title(&mut last_text_content),
-                "ns" => start_page_ns(&mut last_text_content, &mut page_ns),
-                "id" => start_id(&mut last_text_content),
-                "text" => start_page_rev_text(&mut last_text_content),
-                _ => {}
-            },
-            Ok(Event::Empty(node)) => {
-                if get_node_name(&node).as_str() == "namespace" {
-                    start_namespace(&node, &mut ns_key, &mut last_text_content);
-                    end_namespace(ns_key, &last_text_content);
-                }
-            }
-            Ok(Event::End(node)) => match get_node_name_end(&node).as_str() {
-                "namespace" => end_namespace(ns_key, &last_text_content),
-                "title" => end_page_title(&mut page_title, &mut last_text_content),
-                "ns" => end_page_ns(&mut page_ns, &mut last_text_content),
-                "id" => end_id(
-                    &mut page_id,
-                    &mut page_rev_id,
-                    &mut page_rev_contrib_id,
-                    &mut last_text_content,
-                ),
-                "text" => end_page_rev_text(&mut page_rev_text, &mut last_text_content),
-                "page" => end_page(
-                    args.xml,
-                    args.no_updates,
-                    &page_title,
-                    page_ns,
-                    page_id,
-                    page_rev_id,
-                    &page_rev_text,
-                    &mut page_num,
-                    &mut section_num,
-                    &mut just_emitted_update,
-                    &mut headings_seen,
-                    &mut templates_seen,
-                ),
-                _ => {}
-            },
-            Ok(Event::Text(text)) => {
-                let s = String::from_utf8(text.to_vec()).unwrap();
-                if let Some(ref mut last_text_content) = last_text_content {
-                    last_text_content.push_str(&s);
-                } else {
-                    last_text_content = Some(s);
-                }
-            }
-            Ok(Event::Eof) => break,
-            Ok(_) => {}
-            Err(_error) => break, //println!("{}", error),
+    while args.limit.is_none_or(|limit| state.page_num < limit) {
+        if !qx_page(&args, &mut qx_reader, &mut qx_buffer, &mut state) {
+            break;
         }
-
-        // Clear the buffer for the next event
-        buffer.clear();
     }
 
-    if !just_emitted_update && !args.no_updates {
-        emit_update(args.xml, &mut headings_seen, &mut templates_seen);
+    if !state.just_emitted_update && !args.no_updates {
+        emit_update(args.xml, &mut state.headings_seen, &mut state.templates_seen);
     }
 
     if args.xml {
@@ -164,18 +133,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 fn end_page(
     output_xml: bool,               // output format
     no_updates: bool,               // suppress updates
-    title: &String,                 // page's title from the dump
-    namespace: Option<i32>,         // page's namespace
-    page_id: Option<i32>,           // page's id
-    rev_id: Option<i32>,            // page's revision id (history dumps have many, our dumps have one)
-    pagetext: &str,                 // page text
+    page: &Page,                    // page's data
     page_num: &mut u64,             // count of chosen pages
     section_num: &mut u64,          // count of chosen sections (each page may have English, Translingual, or both)
     just_emitted_update: &mut bool, // flag so we don't emit the final update if we just emitted one
     headings_seen: &mut Seen,       // we count how many times we see each heading
     templates_seen: &mut Seen,      // we count how many times we see each template
 ) {
-    if namespace.unwrap() != 0 {
+    if page.ns.unwrap() != 0 {
         return;
     }
 
@@ -184,7 +149,7 @@ fn end_page(
     let mut lang_headings: Vec<String> = Vec::new();
     let mut languages: Vec<String> = Vec::new();
 
-    for capture in all_lang_headings_regex.captures_iter(pagetext) {
+    for capture in all_lang_headings_regex.captures_iter(&page.rev_text) {
         if let (Some(heading), Some(lang)) = (capture.get(0), capture.get(1)) {
             lang_headings.push(heading.as_str().to_string());
             languages.push(lang.as_str().to_string());
@@ -204,15 +169,15 @@ fn end_page(
         true => format!(
             "  <p n=\"{}\" pid=\"{}\" rid=\"{}\">\n    <t>{}</t>",
             page_num,
-            page_id.unwrap(),
-            rev_id.unwrap(),
-            title
+            page.id.unwrap(),
+            page.rev_id.unwrap(),
+            page.title
         ),
-        false => title.clone(),
+        false => page.title.clone(),
     };
 
     // now split the text by the same regex
-    let split_pagetext = our_lang_headings_regex.split(pagetext).collect::<Vec<&str>>();
+    let split_pagetext = our_lang_headings_regex.split(&page.rev_text).collect::<Vec<&str>>();
 
     let mut sections_output_vec: Vec<String> = Vec::new();
 
@@ -369,18 +334,8 @@ fn end_namespace(_ns_key: Option<i32>, last_text_content: &Option<String>) {
     // println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
 }
 
-fn start_page(
-    page_title: &mut String,
-    page_ns: &mut Option<i32>,
-    page_id: &mut Option<i32>,
-    page_rev_id: &mut Option<i32>,
-    page_rev_text: &mut String,
-) {
-    *page_title = String::new();
-    *page_ns = None;
-    *page_id = None;
-    *page_rev_id = None;
-    *page_rev_text = String::new();
+fn start_page(page: &mut Page) {
+    *page = Page::new();
 }
 
 fn start_page_title(last_text_content: &mut Option<String>) {
@@ -405,19 +360,14 @@ fn start_id(last_text_content: &mut Option<String>) {
     *last_text_content = None;
 }
 
-fn end_id(
-    page_id: &mut Option<i32>,
-    page_rev_id: &mut Option<i32>,
-    page_rev_contrib_id: &mut Option<i32>,
-    last_text_content: &mut Option<String>,
-) {
+fn end_id(page: &mut Page, last_text_content: &mut Option<String>) {
     let id = last_text_content.take().unwrap_or_default().parse::<i32>().unwrap();
-    if page_id.is_none() {
-        *page_id = Some(id);
-    } else if page_rev_id.is_none() {
-        *page_rev_id = Some(id);
-    } else if page_rev_contrib_id.is_none() {
-        *page_rev_contrib_id = Some(id);
+    if page.id.is_none() {
+        page.id = Some(id);
+    } else if page.rev_id.is_none() {
+        page.rev_id = Some(id);
+    } else if page.rev_contrib_id.is_none() {
+        page.rev_contrib_id = Some(id);
     }
 }
 
@@ -583,4 +533,67 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
         true => println!("  </update>"),
         false => println!(),
     }
+}
+
+/////////////// quick-xml stuff ///////////
+
+fn qx_page(
+    args: &Args,
+    qx_reader: &mut Reader<StdinLock<'static>>,
+    qx_buffer: &mut Vec<u8>,
+    state: &mut State,
+) -> bool {
+    match qx_reader.read_event_into(qx_buffer) {
+        Ok(Event::Start(node)) => match get_node_name(&node).as_str() {
+            "namespace" => start_namespace(&node, &mut state.ns_key, &mut state.last_text_content),
+            "page" => start_page(&mut state.page),
+            "title" => start_page_title(&mut state.last_text_content),
+            "ns" => start_page_ns(&mut state.last_text_content, &mut state.page.ns), //&mut state.page_ns),
+            "id" => start_id(&mut state.last_text_content),
+            "text" => start_page_rev_text(&mut state.last_text_content),
+            _ => {}
+        },
+        Ok(Event::Empty(node)) => {
+            if get_node_name(&node).as_str() == "namespace" {
+                start_namespace(&node, &mut state.ns_key, &mut state.last_text_content);
+                end_namespace(state.ns_key, &state.last_text_content);
+            }
+        }
+        Ok(Event::End(node)) => match get_node_name_end(&node).as_str() {
+            "namespace" => end_namespace(state.ns_key, &state.last_text_content),
+            "title" => end_page_title(&mut state.page.title, &mut state.last_text_content),
+            "ns" => end_page_ns(&mut state.page.ns, &mut state.last_text_content),
+            "id" => end_id(
+                &mut state.page,
+                &mut state.last_text_content,
+            ),
+            "text" => end_page_rev_text(&mut state.page.rev_text, &mut state.last_text_content),
+            "page" => end_page(
+                args.xml,
+                args.no_updates,
+                &state.page,
+                &mut state.page_num,
+                &mut state.section_num,
+                &mut state.just_emitted_update,
+                &mut state.headings_seen,
+                &mut state.templates_seen,
+            ),
+            _ => {}
+        },
+        Ok(Event::Text(text)) => {
+            let s = String::from_utf8(text.to_vec()).unwrap();
+            if let Some(ref mut last_text_content) = state.last_text_content {
+                last_text_content.push_str(&s);
+            } else {
+                state.last_text_content = Some(s);
+            }
+        }
+        Ok(Event::Eof) => return false,
+        Ok(_) => {}
+        Err(_error) => return false,
+    }
+
+    // Clear the buffer for the next event
+    qx_buffer.clear();
+    true
 }
