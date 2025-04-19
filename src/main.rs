@@ -8,8 +8,8 @@ use quick_xml::reader::Reader;
 use regex::Regex;
 
 mod heading_and_template_lists;
-use heading_and_template_lists::{HEADING_WHITELIST, HEADING_BLACKLIST};
-use heading_and_template_lists::{TEMPLATE_WHITELIST, TEMPLATE_BLACKLIST};
+use heading_and_template_lists::{HEADING_BLACKLIST, HEADING_WHITELIST};
+use heading_and_template_lists::{TEMPLATE_BLACKLIST, TEMPLATE_WHITELIST};
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -21,12 +21,20 @@ struct Args {
     /// Output in lightweight XML format.
     #[clap(short, long)]
     xml: bool,
+
+    /// No updates.
+    #[clap(short, long)]
+    no_updates: bool,
+
+    /// Sample rate. Randomly pick an entry to include with a 1/n chance.
+    #[clap(short, long)]
+    sample_rate: Option<u64>,
 }
 
 struct Seen {
-    white: HashMap<String, u64>,    // headings I specifically want
-    grey: HashMap<String, u64>,     // headings I didn't consider, rare headings, mistakes, etc.
-    black: HashMap<String, u64>,    // headings I specifically don't want
+    white: HashMap<String, u64>, // headings I specifically want
+    grey: HashMap<String, u64>,  // headings I didn't consider, rare headings, mistakes, etc.
+    black: HashMap<String, u64>, // headings I specifically don't want
 }
 
 impl Seen {
@@ -73,7 +81,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(node)) => match get_node_name(&node).as_str() {
                 "namespace" => start_namespace(&node, &mut ns_key, &mut last_text_content),
-                "page" => start_page(&mut page_title, &mut page_ns, &mut page_id, &mut page_rev_id, &mut page_rev_text),
+                "page" => start_page(
+                    &mut page_title,
+                    &mut page_ns,
+                    &mut page_id,
+                    &mut page_rev_id,
+                    &mut page_rev_text,
+                ),
                 "title" => start_page_title(&mut last_text_content),
                 "ns" => start_page_ns(&mut last_text_content, &mut page_ns),
                 "id" => start_id(&mut last_text_content),
@@ -84,17 +98,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 "namespace" => {
                     start_namespace(&node, &mut ns_key, &mut last_text_content);
                     end_namespace(ns_key, &last_text_content);
-                },
+                }
                 _ => {}
             },
             Ok(Event::End(node)) => match get_node_name_end(&node).as_str() {
                 "namespace" => end_namespace(ns_key, &last_text_content),
                 "title" => end_page_title(&mut page_title, &mut last_text_content),
                 "ns" => end_page_ns(&mut page_ns, &mut last_text_content),
-                "id" => end_id(&mut page_id, &mut page_rev_id, &mut page_rev_contrib_id, &mut last_text_content),
+                "id" => end_id(
+                    &mut page_id,
+                    &mut page_rev_id,
+                    &mut page_rev_contrib_id,
+                    &mut last_text_content,
+                ),
                 "text" => end_page_rev_text(&mut page_rev_text, &mut last_text_content),
-                "page" => end_page(args.xml, &page_title, page_ns, page_id, page_rev_id, &page_rev_text,
-                    &mut page_num, &mut section_num, &mut just_emitted_update, &mut headings_seen, &mut templates_seen),
+                "page" => end_page(
+                    args.xml,
+                    args.no_updates,
+                    &page_title,
+                    page_ns,
+                    page_id,
+                    page_rev_id,
+                    &page_rev_text,
+                    &mut page_num,
+                    &mut section_num,
+                    &mut just_emitted_update,
+                    &mut headings_seen,
+                    &mut templates_seen,
+                ),
                 _ => {}
             },
             Ok(Event::Text(text)) => {
@@ -105,16 +136,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     last_text_content = Some(s);
                 }
             }
-            Ok(Event::Eof) => { break }
+            Ok(Event::Eof) => break,
             Ok(_) => {}
-            Err(_error) => break //println!("{}", error),
+            Err(_error) => break, //println!("{}", error),
         }
 
         // Clear the buffer for the next event
         buffer.clear();
     }
 
-    if !just_emitted_update {
+    if !just_emitted_update && !args.no_updates {
         emit_update(args.xml, &mut headings_seen, &mut templates_seen);
     }
 
@@ -127,6 +158,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 fn end_page(
     output_xml: bool,               // output format
+    no_updates: bool,               // suppress updates
     title: &String,                 // page's title from the dump
     namespace: Option<i32>,         // page's namespace
     page_id: Option<i32>,           // page's id
@@ -138,8 +170,10 @@ fn end_page(
     headings_seen: &mut Seen,       // we count how many times we see each heading
     templates_seen: &mut Seen,      // we count how many times we see each template
 ) {
-    if namespace.unwrap() != 0 { return; }
-    
+    if namespace.unwrap() != 0 {
+        return;
+    }
+
     let all_lang_headings_regex = Regex::new(r"(?m)^== ?([^=]*?) ?== *$\n").unwrap();
     let our_lang_headings_regex = Regex::new(r"(?m)^== ?(English|Translingual) ?== *$\n").unwrap();
     let mut lang_headings: Vec<String> = Vec::new();
@@ -154,14 +188,21 @@ fn end_page(
 
     languages.retain(|lang| lang == "English" || lang == "Translingual");
 
-    if languages.len() == 0 { return }
+    if languages.len() == 0 {
+        return;
+    }
 
     // only count pages we don't reject
     *page_num += 1;
 
     let mut page_output = match output_xml {
-        true => format!("  <p n=\"{}\" pid=\"{}\" rid=\"{}\">\n    <t>{}</t>",
-            page_num, page_id.unwrap(), rev_id.unwrap(), title),
+        true => format!(
+            "  <p n=\"{}\" pid=\"{}\" rid=\"{}\">\n    <t>{}</t>",
+            page_num,
+            page_id.unwrap(),
+            rev_id.unwrap(),
+            title
+        ),
         false => title.clone(),
     };
 
@@ -175,8 +216,8 @@ fn end_page(
         *section_num += 1;
 
         let mut section_output = match output_xml {
-            true => format!("    <s n=\"{}\" l=\"{}\">", section_num, languages[i-1]),
-            false => format!("  {}", languages[i-1]),
+            true => format!("    <s n=\"{}\" l=\"{}\">", section_num, languages[i - 1]),
+            false => format!("  {}", languages[i - 1]),
         };
 
         // get everything after this heading
@@ -187,18 +228,18 @@ fn end_page(
         }
 
         let (headings, templates) = get_headings_and_templates(langsectext);
-        let (nonblack_headings, white_templates) = categorize_and_count(headings_seen, headings, templates_seen, templates);
+        let (nonblack_headings, white_templates) =
+            categorize_and_count(headings_seen, headings, templates_seen, templates);
 
         if nonblack_headings.len() > 0 {
             let depth = output_xml as i32 * 4 - 2;
 
-            let chosen_headings = "\n".to_owned() + &nonblack_headings
-                .iter()
-                .map(|h| format!("{:width$}{}",
-                    "", h.0, width = (h.1 as i32 * 2 + depth) as usize
-                ))
-                .collect::<Vec<String>>()
-                .join("\n");
+            let chosen_headings = "\n".to_owned()
+                + &nonblack_headings
+                    .iter()
+                    .map(|h| format!("{:width$}{}", "", h.0, width = (h.1 as i32 * 2 + depth) as usize))
+                    .collect::<Vec<String>>()
+                    .join("\n");
 
             if output_xml {
                 section_output += "\n";
@@ -213,11 +254,12 @@ fn end_page(
         }
 
         if white_templates.len() > 0 {
-            let chosen_templates = "\n".to_owned() + &white_templates
-                .iter()
-                .map(|h| format!("        {}: {}", h.0, h.1))
-                .collect::<Vec<String>>()
-                .join("\n");
+            let chosen_templates = "\n".to_owned()
+                + &white_templates
+                    .iter()
+                    .map(|h| format!("{:d$}{}: {}", "", h.0, h.1, d = if output_xml { 8 } else { 2 }))
+                    .collect::<Vec<String>>()
+                    .join("\n");
 
             if output_xml {
                 section_output += "\n";
@@ -246,15 +288,17 @@ fn end_page(
 
         // every n pages, emit an update
         *just_emitted_update = *page_num % 256 == 0;
-        if *just_emitted_update {
+        if *just_emitted_update && !no_updates {
             emit_update(output_xml, headings_seen, templates_seen);
         }
     }
 }
 
 fn categorize_and_count(
-    seen_headings: &mut Seen, headings: Vec<(String, u8)>,
-    seen_templates: &mut Seen, templates: Vec<(String, u16)>
+    seen_headings: &mut Seen,
+    headings: Vec<(String, u8)>,
+    seen_templates: &mut Seen,
+    templates: Vec<(String, u16)>,
 ) -> (Vec<(String, u8)>, Vec<(String, u16)>) {
     let mut nonblack_headings: Vec<(String, u8)> = Vec::new();
 
@@ -297,9 +341,21 @@ fn get_node_name_end(node: &quick_xml::events::BytesEnd) -> String {
     String::from_utf8(node.name().0.to_vec()).unwrap()
 }
 
-fn start_namespace(node: &quick_xml::events::BytesStart, ns_key: &mut Option<i32>, last_text_content: &mut Option<String>) {
-    if let Some(att) = node.attributes().find(|a| a.as_ref().unwrap().key == quick_xml::name::QName(b"key")) {
-        *ns_key = Some(String::from_utf8(att.unwrap().value.to_vec()).unwrap().parse::<i32>().unwrap());
+fn start_namespace(
+    node: &quick_xml::events::BytesStart,
+    ns_key: &mut Option<i32>,
+    last_text_content: &mut Option<String>,
+) {
+    if let Some(att) = node
+        .attributes()
+        .find(|a| a.as_ref().unwrap().key == quick_xml::name::QName(b"key"))
+    {
+        *ns_key = Some(
+            String::from_utf8(att.unwrap().value.to_vec())
+                .unwrap()
+                .parse::<i32>()
+                .unwrap(),
+        );
     }
     *last_text_content = None; // Reset for each namespace
 }
@@ -310,8 +366,13 @@ fn end_namespace(_ns_key: Option<i32>, last_text_content: &Option<String>) {
     // println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
 }
 
-fn start_page(page_title: &mut String, page_ns: &mut Option<i32>,
-        page_id: &mut Option<i32>, page_rev_id: &mut Option<i32>, page_rev_text: &mut String) {
+fn start_page(
+    page_title: &mut String,
+    page_ns: &mut Option<i32>,
+    page_id: &mut Option<i32>,
+    page_rev_id: &mut Option<i32>,
+    page_rev_text: &mut String,
+) {
     *page_title = String::new();
     *page_ns = None;
     *page_id = None;
@@ -341,7 +402,12 @@ fn start_id(last_text_content: &mut Option<String>) {
     *last_text_content = None;
 }
 
-fn end_id(page_id: &mut Option<i32>, page_rev_id: &mut Option<i32>, page_rev_contrib_id: &mut Option<i32>, last_text_content: &mut Option<String>) {
+fn end_id(
+    page_id: &mut Option<i32>,
+    page_rev_id: &mut Option<i32>,
+    page_rev_contrib_id: &mut Option<i32>,
+    last_text_content: &mut Option<String>,
+) {
     let id = last_text_content.take().unwrap_or_default().parse::<i32>().unwrap();
     if page_id.is_none() {
         *page_id = Some(id);
@@ -395,7 +461,7 @@ fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String
     }
 
     templates.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    
+
     (headings, templates)
 }
 
@@ -414,9 +480,10 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
         }
     }
 
-    for (index, headings) in [
-        &headings_seen.white, &headings_seen.grey, &headings_seen.black
-    ].iter().enumerate() {
+    for (index, headings) in [&headings_seen.white, &headings_seen.grey, &headings_seen.black]
+        .iter()
+        .enumerate()
+    {
         if headings.len() == 0 {
             continue;
         }
@@ -436,7 +503,14 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
             false => |h: &str, c: &u64| format!("      {}: {}", h, c),
         };
 
-        println!("{}", headings.iter().map(|(h, c)| fmt(h, c)).collect::<Vec<String>>().join("\n"));
+        println!(
+            "{}",
+            headings
+                .iter()
+                .map(|(h, c)| fmt(h, c))
+                .collect::<Vec<String>>()
+                .join("\n")
+        );
 
         match output_xml {
             true => println!("      </{}>", heading_name),
@@ -457,9 +531,10 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
         }
     }
 
-    for (index, templates) in [
-        &templates_seen.white, &templates_seen.grey, &templates_seen.black
-    ].iter().enumerate() {
+    for (index, templates) in [&templates_seen.white, &templates_seen.grey, &templates_seen.black]
+        .iter()
+        .enumerate()
+    {
         if templates.len() == 0 {
             continue;
         }
@@ -479,7 +554,14 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
             false => |h: &str, c: &u64| format!("      {}: {}", h, c),
         };
 
-        println!("{}", templates.iter().map(|(h, c)| fmt(h, c)).collect::<Vec<String>>().join("\n"));
+        println!(
+            "{}",
+            templates
+                .iter()
+                .map(|(h, c)| fmt(h, c))
+                .collect::<Vec<String>>()
+                .join("\n")
+        );
 
         match output_xml {
             true => println!("      </{}>", template_name),
