@@ -11,6 +11,12 @@ mod heading_and_template_lists;
 use heading_and_template_lists::{HEADING_BLACKLIST, HEADING_WHITELIST};
 use heading_and_template_lists::{TEMPLATE_BLACKLIST, TEMPLATE_WHITELIST};
 
+// Type aliases for complex tuple types
+type Heading = (String, u8);
+type Template = (String, u16);
+type HeadingVec = Vec<Heading>;
+type TemplateVec = Vec<Template>;
+
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Args {
@@ -77,7 +83,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut just_emitted_update = false;
 
-    while args.limit.map_or(true, |limit| page_num < limit) {
+    while args.limit.is_none_or(|limit| page_num < limit) {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(node)) => match get_node_name(&node).as_str() {
                 "namespace" => start_namespace(&node, &mut ns_key, &mut last_text_content),
@@ -94,13 +100,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 "text" => start_page_rev_text(&mut last_text_content),
                 _ => {}
             },
-            Ok(Event::Empty(node)) => match get_node_name(&node).as_str() {
-                "namespace" => {
+            Ok(Event::Empty(node)) => {
+                if get_node_name(&node).as_str() == "namespace" {
                     start_namespace(&node, &mut ns_key, &mut last_text_content);
                     end_namespace(ns_key, &last_text_content);
                 }
-                _ => {}
-            },
+            }
             Ok(Event::End(node)) => match get_node_name_end(&node).as_str() {
                 "namespace" => end_namespace(ns_key, &last_text_content),
                 "title" => end_page_title(&mut page_title, &mut last_text_content),
@@ -163,7 +168,7 @@ fn end_page(
     namespace: Option<i32>,         // page's namespace
     page_id: Option<i32>,           // page's id
     rev_id: Option<i32>,            // page's revision id (history dumps have many, our dumps have one)
-    pagetext: &String,              // page text
+    pagetext: &str,                 // page text
     page_num: &mut u64,             // count of chosen pages
     section_num: &mut u64,          // count of chosen sections (each page may have English, Translingual, or both)
     just_emitted_update: &mut bool, // flag so we don't emit the final update if we just emitted one
@@ -188,7 +193,7 @@ fn end_page(
 
     languages.retain(|lang| lang == "English" || lang == "Translingual");
 
-    if languages.len() == 0 {
+    if languages.is_empty() {
         return;
     }
 
@@ -231,7 +236,7 @@ fn end_page(
         let (nonblack_headings, white_templates) =
             categorize_and_count(headings_seen, headings, templates_seen, templates);
 
-        if nonblack_headings.len() > 0 {
+        if !nonblack_headings.is_empty() {
             let depth = output_xml as i32 * 4 - 2;
 
             let chosen_headings = "\n".to_owned()
@@ -248,12 +253,12 @@ fn end_page(
                 section_output += &format!("{}\n", chosen_headings);
             }
 
-            if chosen_headings.len() == 0 {
+            if chosen_headings.is_empty() {
                 eprintln!("** have headings but no stuff chosen **")
             }
         }
 
-        if white_templates.len() > 0 {
+        if !white_templates.is_empty() {
             let chosen_templates = "\n".to_owned()
                 + &white_templates
                     .iter()
@@ -277,7 +282,7 @@ fn end_page(
         sections_output_vec.push(section_output);
     }
 
-    if sections_output_vec.len() > 0 {
+    if !sections_output_vec.is_empty() {
         page_output += "\n";
         page_output += &sections_output_vec.join("\n");
         if output_xml {
@@ -296,11 +301,11 @@ fn end_page(
 
 fn categorize_and_count(
     seen_headings: &mut Seen,
-    headings: Vec<(String, u8)>,
+    headings: HeadingVec,
     seen_templates: &mut Seen,
-    templates: Vec<(String, u16)>,
-) -> (Vec<(String, u8)>, Vec<(String, u16)>) {
-    let mut nonblack_headings: Vec<(String, u8)> = Vec::new();
+    templates: TemplateVec,
+) -> (HeadingVec, TemplateVec) {
+    let mut nonblack_headings: HeadingVec = Vec::new();
 
     for heading in headings {
         if HEADING_BLACKLIST.contains(&heading.0.as_str()) {
@@ -315,18 +320,16 @@ fn categorize_and_count(
         }
     }
 
-    let mut white_templates: Vec<(String, u16)> = Vec::new();
+    let mut white_templates: TemplateVec = Vec::new();
 
     for (template, count) in templates {
         if TEMPLATE_BLACKLIST.contains(&template.as_str()) {
             *seen_templates.black.entry(template.clone()).or_insert(0) += count as u64;
+        } else if TEMPLATE_WHITELIST.contains(&template.as_str()) {
+            *seen_templates.white.entry(template.clone()).or_insert(0) += count as u64;
+            white_templates.push((template.clone(), count));
         } else {
-            if TEMPLATE_WHITELIST.contains(&template.as_str()) {
-                *seen_templates.white.entry(template.clone()).or_insert(0) += count as u64;
-                white_templates.push((template.clone(), count.into()));
-            } else {
-                *seen_templates.grey.entry(template.clone()).or_insert(0) += count as u64;
-            }
+            *seen_templates.grey.entry(template.clone()).or_insert(0) += count as u64;
         }
     }
 
@@ -428,9 +431,9 @@ fn end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<
 
 // from the text of a language section, collect all headings and their depths
 // and all templates and their counts
-fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String, u16)>) {
+fn get_headings_and_templates(langsect: &str) -> (HeadingVec, TemplateVec) {
     let all_headings_regex = Regex::new(r"(?m)^(===+) ?([^=]*?) ?===+ *$\n").unwrap();
-    let mut headings: Vec<(String, u8)> = Vec::new();
+    let mut headings: HeadingVec = Vec::new();
 
     for cap in all_headings_regex.captures_iter(langsect) {
         let heading_depth = cap.get(1).unwrap().as_str().len();
@@ -440,7 +443,7 @@ fn get_headings_and_templates(langsect: &str) -> (Vec<(String, u8)>, Vec<(String
     }
 
     let all_templates_regex = Regex::new(r"(?m)\{\{([^|}:&]*[|:&])").unwrap();
-    let mut templates: Vec<(String, u16)> = Vec::new();
+    let mut templates: TemplateVec = Vec::new();
 
     let mut seen_map: HashMap<String, u16> = HashMap::new();
 
@@ -473,7 +476,7 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
         false => println!("--update--"),
     }
 
-    if headings_seen.white.len() != 0 || headings_seen.grey.len() != 0 || headings_seen.black.len() != 0 {
+    if !headings_seen.white.is_empty() || !headings_seen.grey.is_empty() || !headings_seen.black.is_empty() {
         match output_xml {
             true => println!("    <headings>"),
             false => println!("  headings"),
@@ -484,7 +487,7 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
         .iter()
         .enumerate()
     {
-        if headings.len() == 0 {
+        if headings.is_empty() {
             continue;
         }
 
@@ -514,17 +517,17 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
 
         match output_xml {
             true => println!("      </{}>", heading_name),
-            false => println!(""),
+            false => println!(),
         }
     }
 
-    if headings_seen.white.len() != 0 || headings_seen.grey.len() != 0 || headings_seen.black.len() != 0 {
+    if !headings_seen.white.is_empty() || !headings_seen.grey.is_empty() || !headings_seen.black.is_empty() {
         match output_xml {
             true => println!("    </headings>"),
-            false => println!(""),
+            false => println!(),
         }
     }
-    if templates_seen.white.len() != 0 || templates_seen.grey.len() != 0 || templates_seen.black.len() != 0 {
+    if !templates_seen.white.is_empty() || !templates_seen.grey.is_empty() || !templates_seen.black.is_empty() {
         match output_xml {
             true => println!("    <templates>"),
             false => println!("  templates"),
@@ -535,7 +538,7 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
         .iter()
         .enumerate()
     {
-        if templates.len() == 0 {
+        if templates.is_empty() {
             continue;
         }
 
@@ -565,19 +568,19 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
 
         match output_xml {
             true => println!("      </{}>", template_name),
-            false => println!(""),
+            false => println!(),
         }
     }
 
-    if templates_seen.white.len() != 0 || templates_seen.grey.len() != 0 || templates_seen.black.len() != 0 {
+    if !templates_seen.white.is_empty() || !templates_seen.grey.is_empty() || !templates_seen.black.is_empty() {
         match output_xml {
             true => println!("    </templates>"),
-            false => println!(""),
+            false => println!(),
         }
     }
 
     match output_xml {
         true => println!("  </update>"),
-        false => println!(""),
+        false => println!(),
     }
 }
