@@ -491,10 +491,7 @@ fn qx_iterate(
             b"namespace" => qx_end_namespace(state.ns_key, &state.last_text_content),
             b"title" => qx_end_page_title(&mut state.page.title, &mut state.last_text_content),
             b"ns" => qx_end_page_ns(&mut state.page.ns, &mut state.last_text_content),
-            b"id" => qx_end_id(
-                &mut state.page,
-                &mut state.last_text_content,
-            ),
+            b"id" => qx_end_id(&mut state.page,&mut state.last_text_content),
             b"text" => qx_end_page_rev_text(&mut state.page.rev_text, &mut state.last_text_content),
             b"page" => qx_end_page(args, state),
             _ => {}
