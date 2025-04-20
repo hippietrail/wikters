@@ -3,8 +3,7 @@ use std::error::Error;
 use std::io::{self, StdinLock};
 
 use clap::Parser;
-use quick_xml::events::Event;
-use quick_xml::reader::Reader;
+use quick_xml::{events::{BytesStart, Event}, name::QName, reader::Reader};
 use regex::Regex;
 
 mod heading_and_template_lists;
@@ -114,7 +113,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut qx_buffer = Vec::new();
 
     while args.limit.is_none_or(|limit| state.page_num < limit) {
-        if !qx_page(&args, &mut qx_reader, &mut qx_buffer, &mut state) {
+        if !qx_iterate(&args, &mut qx_reader, &mut qx_buffer, &mut state) {
             break;
         }
     }
@@ -129,6 +128,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+// Called with nothing quick-xml specific when each </page> closing tag has been read
 
 fn end_page(
     output_xml: bool,               // output format
@@ -301,84 +302,6 @@ fn categorize_and_count(
     (nonblack_headings, white_templates)
 }
 
-fn get_node_name(node: &quick_xml::events::BytesStart) -> String {
-    String::from_utf8(node.name().0.to_vec()).unwrap()
-}
-
-fn get_node_name_end(node: &quick_xml::events::BytesEnd) -> String {
-    String::from_utf8(node.name().0.to_vec()).unwrap()
-}
-
-fn start_namespace(
-    node: &quick_xml::events::BytesStart,
-    ns_key: &mut Option<i32>,
-    last_text_content: &mut Option<String>,
-) {
-    if let Some(att) = node
-        .attributes()
-        .find(|a| a.as_ref().unwrap().key == quick_xml::name::QName(b"key"))
-    {
-        *ns_key = Some(
-            String::from_utf8(att.unwrap().value.to_vec())
-                .unwrap()
-                .parse::<i32>()
-                .unwrap(),
-        );
-    }
-    *last_text_content = None; // Reset for each namespace
-}
-
-fn end_namespace(_ns_key: Option<i32>, last_text_content: &Option<String>) {
-    // The default namespace, 0, has no name
-    let _ns_text = last_text_content.as_ref().unwrap_or(&String::from("")).clone();
-    // println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
-}
-
-fn start_page(page: &mut Page) {
-    *page = Page::new();
-}
-
-fn start_page_title(last_text_content: &mut Option<String>) {
-    *last_text_content = None;
-}
-
-fn end_page_title(page_title: &mut String, last_text_content: &mut Option<String>) {
-    *page_title = last_text_content.take().unwrap_or_default();
-}
-
-fn start_page_ns(last_text_content: &mut Option<String>, page_ns: &mut Option<i32>) {
-    *page_ns = None;
-    *last_text_content = None;
-}
-
-fn end_page_ns(page_ns: &mut Option<i32>, last_text_content: &mut Option<String>) {
-    let ns_text = last_text_content.take().unwrap_or_default();
-    *page_ns = ns_text.parse::<i32>().ok();
-}
-
-fn start_id(last_text_content: &mut Option<String>) {
-    *last_text_content = None;
-}
-
-fn end_id(page: &mut Page, last_text_content: &mut Option<String>) {
-    let id = last_text_content.take().unwrap_or_default().parse::<i32>().unwrap();
-    if page.id.is_none() {
-        page.id = Some(id);
-    } else if page.rev_id.is_none() {
-        page.rev_id = Some(id);
-    } else if page.rev_contrib_id.is_none() {
-        page.rev_contrib_id = Some(id);
-    }
-}
-
-fn start_page_rev_text(last_text_content: &mut Option<String>) {
-    *last_text_content = None;
-}
-
-fn end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<String>) {
-    *page_rev_text = last_text_content.take().unwrap_or_default();
-}
-
 // from the text of a language section, collect all headings and their depths
 // and all templates and their counts
 fn get_headings_and_templates(langsect: &str) -> (HeadingVec, TemplateVec) {
@@ -537,38 +460,43 @@ fn emit_update(output_xml: bool, headings_seen: &mut Seen, templates_seen: &mut 
 
 /////////////// quick-xml stuff ///////////
 
-fn qx_page(
+// Does one 'iteration' of the quick-xml loop.
+// This does not mean get the next page.
+// In the quick-xml case it means one 'Event'
+// Calls `end_page` when it gets to the </page> - calls with nothing quick-xml specific!
+
+fn qx_iterate(
     args: &Args,
     qx_reader: &mut Reader<StdinLock<'static>>,
     qx_buffer: &mut Vec<u8>,
     state: &mut State,
 ) -> bool {
     match qx_reader.read_event_into(qx_buffer) {
-        Ok(Event::Start(node)) => match get_node_name(&node).as_str() {
-            "namespace" => start_namespace(&node, &mut state.ns_key, &mut state.last_text_content),
-            "page" => start_page(&mut state.page),
-            "title" => start_page_title(&mut state.last_text_content),
-            "ns" => start_page_ns(&mut state.last_text_content, &mut state.page.ns), //&mut state.page_ns),
-            "id" => start_id(&mut state.last_text_content),
-            "text" => start_page_rev_text(&mut state.last_text_content),
+        Ok(Event::Start(node)) => match node.name().as_ref() {
+            b"namespace" => start_namespace(&node, &mut state.ns_key, &mut state.last_text_content),
+            b"page" => start_page(&mut state.page),
+            b"title" => start_page_title(&mut state.last_text_content),
+            b"ns" => start_page_ns(&mut state.last_text_content, &mut state.page.ns),
+            b"id" => start_id(&mut state.last_text_content),
+            b"text" => start_page_rev_text(&mut state.last_text_content),
             _ => {}
         },
         Ok(Event::Empty(node)) => {
-            if get_node_name(&node).as_str() == "namespace" {
+            if node.name().as_ref() == b"namespace" {
                 start_namespace(&node, &mut state.ns_key, &mut state.last_text_content);
                 end_namespace(state.ns_key, &state.last_text_content);
             }
         }
-        Ok(Event::End(node)) => match get_node_name_end(&node).as_str() {
-            "namespace" => end_namespace(state.ns_key, &state.last_text_content),
-            "title" => end_page_title(&mut state.page.title, &mut state.last_text_content),
-            "ns" => end_page_ns(&mut state.page.ns, &mut state.last_text_content),
-            "id" => end_id(
+        Ok(Event::End(node)) => match node.name().as_ref() {
+            b"namespace" => end_namespace(state.ns_key, &state.last_text_content),
+            b"title" => end_page_title(&mut state.page.title, &mut state.last_text_content),
+            b"ns" => end_page_ns(&mut state.page.ns, &mut state.last_text_content),
+            b"id" => end_id(
                 &mut state.page,
                 &mut state.last_text_content,
             ),
-            "text" => end_page_rev_text(&mut state.page.rev_text, &mut state.last_text_content),
-            "page" => end_page(
+            b"text" => end_page_rev_text(&mut state.page.rev_text, &mut state.last_text_content),
+            b"page" => end_page(
                 args.xml,
                 args.no_updates,
                 &state.page,
@@ -596,4 +524,74 @@ fn qx_page(
     // Clear the buffer for the next event
     qx_buffer.clear();
     true
+}
+
+///// quick-xml implementation functions moved from main part of code
+
+// siteinfo/namespaces/namespace
+fn start_namespace(node: &BytesStart, ns_key: &mut Option<i32>, last_text_content: &mut Option<String>) {
+    if let Some(att) = node
+        .attributes()
+        .find(|a| a.as_ref().unwrap().key == QName(b"key"))
+    {
+        *ns_key = Some(
+            String::from_utf8(att.unwrap().value.to_vec())
+                .unwrap()
+                .parse::<i32>()
+                .unwrap(),
+        );
+    }
+    *last_text_content = None; // Reset for each namespace
+}
+
+// siteinfo/namespaces/namespace
+fn end_namespace(_ns_key: Option<i32>, last_text_content: &Option<String>) {
+    // The default namespace, 0, has no name
+    let _ns_text = last_text_content.as_ref().unwrap_or(&String::from("")).clone();
+    // println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
+}
+
+fn start_page(page: &mut Page) {
+    *page = Page::new();
+}
+
+fn start_page_title(last_text_content: &mut Option<String>) {
+    *last_text_content = None;
+}
+
+fn end_page_title(page_title: &mut String, last_text_content: &mut Option<String>) {
+    *page_title = last_text_content.take().unwrap_or_default();
+}
+
+fn start_page_ns(last_text_content: &mut Option<String>, page_ns: &mut Option<i32>) {
+    *page_ns = None;
+    *last_text_content = None;
+}
+
+fn end_page_ns(page_ns: &mut Option<i32>, last_text_content: &mut Option<String>) {
+    let ns_text = last_text_content.take().unwrap_or_default();
+    *page_ns = ns_text.parse::<i32>().ok();
+}
+
+fn start_id(last_text_content: &mut Option<String>) {
+    *last_text_content = None;
+}
+
+fn end_id(page: &mut Page, last_text_content: &mut Option<String>) {
+    let id = last_text_content.take().unwrap_or_default().parse::<i32>().unwrap();
+    if page.id.is_none() {
+        page.id = Some(id);
+    } else if page.rev_id.is_none() {
+        page.rev_id = Some(id);
+    } else if page.rev_contrib_id.is_none() {
+        page.rev_contrib_id = Some(id);
+    }
+}
+
+fn start_page_rev_text(last_text_content: &mut Option<String>) {
+    *last_text_content = None;
+}
+
+fn end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<String>) {
+    *page_rev_text = last_text_content.take().unwrap_or_default();
 }
