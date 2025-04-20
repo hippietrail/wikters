@@ -473,39 +473,30 @@ fn qx_iterate(
 ) -> bool {
     match qx_reader.read_event_into(qx_buffer) {
         Ok(Event::Start(node)) => match node.name().as_ref() {
-            b"namespace" => start_namespace(&node, &mut state.ns_key, &mut state.last_text_content),
-            b"page" => start_page(&mut state.page),
-            b"title" => start_page_title(&mut state.last_text_content),
-            b"ns" => start_page_ns(&mut state.last_text_content, &mut state.page.ns),
-            b"id" => start_id(&mut state.last_text_content),
-            b"text" => start_page_rev_text(&mut state.last_text_content),
+            b"namespace" => qx_start_namespace(&node, &mut state.ns_key, &mut state.last_text_content),
+            b"page" => qx_start_page(&mut state.page),
+            b"title" => qx_start_page_title(&mut state.last_text_content),
+            b"ns" => qx_start_page_ns(&mut state.last_text_content, &mut state.page.ns),
+            b"id" => qx_start_id(&mut state.last_text_content),
+            b"text" => qx_start_page_rev_text(&mut state.last_text_content),
             _ => {}
         },
         Ok(Event::Empty(node)) => {
             if node.name().as_ref() == b"namespace" {
-                start_namespace(&node, &mut state.ns_key, &mut state.last_text_content);
-                end_namespace(state.ns_key, &state.last_text_content);
+                qx_start_namespace(&node, &mut state.ns_key, &mut state.last_text_content);
+                qx_end_namespace(state.ns_key, &state.last_text_content);
             }
         }
         Ok(Event::End(node)) => match node.name().as_ref() {
-            b"namespace" => end_namespace(state.ns_key, &state.last_text_content),
-            b"title" => end_page_title(&mut state.page.title, &mut state.last_text_content),
-            b"ns" => end_page_ns(&mut state.page.ns, &mut state.last_text_content),
-            b"id" => end_id(
+            b"namespace" => qx_end_namespace(state.ns_key, &state.last_text_content),
+            b"title" => qx_end_page_title(&mut state.page.title, &mut state.last_text_content),
+            b"ns" => qx_end_page_ns(&mut state.page.ns, &mut state.last_text_content),
+            b"id" => qx_end_id(
                 &mut state.page,
                 &mut state.last_text_content,
             ),
-            b"text" => end_page_rev_text(&mut state.page.rev_text, &mut state.last_text_content),
-            b"page" => end_page(
-                args.xml,
-                args.no_updates,
-                &state.page,
-                &mut state.page_num,
-                &mut state.section_num,
-                &mut state.just_emitted_update,
-                &mut state.headings_seen,
-                &mut state.templates_seen,
-            ),
+            b"text" => qx_end_page_rev_text(&mut state.page.rev_text, &mut state.last_text_content),
+            b"page" => qx_end_page(args, state),
             _ => {}
         },
         Ok(Event::Text(text)) => {
@@ -529,7 +520,7 @@ fn qx_iterate(
 ///// quick-xml implementation functions moved from main part of code
 
 // siteinfo/namespaces/namespace
-fn start_namespace(node: &BytesStart, ns_key: &mut Option<i32>, last_text_content: &mut Option<String>) {
+fn qx_start_namespace(node: &BytesStart, ns_key: &mut Option<i32>, last_text_content: &mut Option<String>) {
     if let Some(att) = node
         .attributes()
         .find(|a| a.as_ref().unwrap().key == QName(b"key"))
@@ -545,39 +536,52 @@ fn start_namespace(node: &BytesStart, ns_key: &mut Option<i32>, last_text_conten
 }
 
 // siteinfo/namespaces/namespace
-fn end_namespace(_ns_key: Option<i32>, last_text_content: &Option<String>) {
+fn qx_end_namespace(_ns_key: Option<i32>, last_text_content: &Option<String>) {
     // The default namespace, 0, has no name
     let _ns_text = last_text_content.as_ref().unwrap_or(&String::from("")).clone();
     // println!("namespace {} : \"{}\"", ns_key.unwrap(), ns_text);
 }
 
-fn start_page(page: &mut Page) {
+fn qx_start_page(page: &mut Page) {
     *page = Page::new();
 }
 
-fn start_page_title(last_text_content: &mut Option<String>) {
+fn qx_end_page(args: &Args, state: &mut State) {
+    end_page(
+        args.xml,
+        args.no_updates,
+        &state.page,
+        &mut state.page_num,
+        &mut state.section_num,
+        &mut state.just_emitted_update,
+        &mut state.headings_seen,
+        &mut state.templates_seen,
+    );
+}
+
+fn qx_start_page_title(last_text_content: &mut Option<String>) {
     *last_text_content = None;
 }
 
-fn end_page_title(page_title: &mut String, last_text_content: &mut Option<String>) {
+fn qx_end_page_title(page_title: &mut String, last_text_content: &mut Option<String>) {
     *page_title = last_text_content.take().unwrap_or_default();
 }
 
-fn start_page_ns(last_text_content: &mut Option<String>, page_ns: &mut Option<i32>) {
+fn qx_start_page_ns(last_text_content: &mut Option<String>, page_ns: &mut Option<i32>) {
     *page_ns = None;
     *last_text_content = None;
 }
 
-fn end_page_ns(page_ns: &mut Option<i32>, last_text_content: &mut Option<String>) {
+fn qx_end_page_ns(page_ns: &mut Option<i32>, last_text_content: &mut Option<String>) {
     let ns_text = last_text_content.take().unwrap_or_default();
     *page_ns = ns_text.parse::<i32>().ok();
 }
 
-fn start_id(last_text_content: &mut Option<String>) {
+fn qx_start_id(last_text_content: &mut Option<String>) {
     *last_text_content = None;
 }
 
-fn end_id(page: &mut Page, last_text_content: &mut Option<String>) {
+fn qx_end_id(page: &mut Page, last_text_content: &mut Option<String>) {
     let id = last_text_content.take().unwrap_or_default().parse::<i32>().unwrap();
     if page.id.is_none() {
         page.id = Some(id);
@@ -588,10 +592,10 @@ fn end_id(page: &mut Page, last_text_content: &mut Option<String>) {
     }
 }
 
-fn start_page_rev_text(last_text_content: &mut Option<String>) {
+fn qx_start_page_rev_text(last_text_content: &mut Option<String>) {
     *last_text_content = None;
 }
 
-fn end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<String>) {
+fn qx_end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<String>) {
     *page_rev_text = last_text_content.take().unwrap_or_default();
 }
