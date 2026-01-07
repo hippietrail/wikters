@@ -2,14 +2,11 @@ use std::error::Error;
 use std::io;
 
 use clap::Parser;
-use quick_xml::Reader;
 
-// how to access handrolled/process_dump?
-use wikters::handrolled::process_dump;
-use wikters::qx_iterate;
+use wikters::handrolled::HandRolledReader;
+use wikters::quick_xml_reader::QuickXmlReader;
+use wikters::process_pages;
 use wikters::Opts;
-use wikters::Page;
-use wikters::State;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -48,30 +45,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let stdin = io::stdin();
 
-    let mut state = State {
-        last_text_content: None,
-        ns_key: None,
-        page: Page::new(),
-        page_num: 0,
-        section_num: 0,
-        just_emitted_update: false,
+    // Choose reader implementation based on command line argument
+    let source: Box<dyn wikters::PageSource> = if args.handrolled {
+        Box::new(HandRolledReader::new(stdin.lock()))
+    } else {
+        Box::new(QuickXmlReader::new(stdin.lock()))
     };
 
-    // Choose parsing method based on command line argument
-    if args.handrolled {
-        // Use hand-rolled parser
-        process_dump(&opts, stdin.lock())?;
-    } else {
-        // Use quick-xml parser
-        let mut qx_reader = Reader::from_reader(stdin.lock());
-        let mut qx_buffer = Vec::new();
-
-        while args.limit.is_none_or(|limit| state.page_num < limit) {
-            if !qx_iterate(&opts, &mut qx_reader, &mut qx_buffer, &mut state) {
-                break;
-            }
-        }
-    }
+    process_pages(&opts, source)?;
 
     Ok(())
 }

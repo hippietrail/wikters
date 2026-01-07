@@ -1,18 +1,15 @@
-use std::collections::HashMap;
-use std::io::StdinLock;
-
-use quick_xml::{
-    events::{BytesStart, Event},
-    name::QName,
-    reader::Reader,
-};
+use std::error::Error;
 use regex::Regex;
 
 mod heading_and_template_lists;
-use heading_and_template_lists::{HEADING_BLACKLIST, HEADING_WHITELIST};
-use heading_and_template_lists::{TEMPLATE_BLACKLIST, TEMPLATE_WHITELIST};
 
 pub mod handrolled;
+pub mod quick_xml_reader;
+
+/// Trait for XML dump readers - produces pages from MediaWiki XML
+pub trait PageSource {
+    fn next_page(&mut self) -> Result<Option<Page>, Box<dyn Error>>;
+}
 
 #[derive(Debug)]
 pub struct Opts {
@@ -23,19 +20,38 @@ pub struct Opts {
     pub handrolled: bool,
 }
 
-// Type aliases for complex tuple types
-type Heading = (String, u8);
-type Template = (String, u16);
-type HeadingVec = Vec<Heading>;
-type TemplateVec = Vec<Template>;
+/// Process pages from a PageSource, applying wikitext parsing to each
+pub fn process_pages(opts: &Opts, mut source: Box<dyn PageSource>) -> Result<(), Box<dyn Error>> {
+    let mut page_num = 0;
+    let mut section_num = 0;
+    
+    loop {
+        if let Some(limit) = opts.limit {
+            if page_num >= limit {
+                break;
+            }
+        }
+        
+        match source.next_page()? {
+            Some(page) => {
+                parse_page_wikitext(&page, &mut page_num, &mut section_num);
+            }
+            None => break,
+        }
+    }
+    
+    Ok(())
+}
+
+
 
 pub struct Page {
-    title: String,
-    ns: Option<i32>,
-    id: Option<i32>,
-    rev_id: Option<i32>,
-    rev_contrib_id: Option<i32>,
-    rev_text: String,
+    pub title: String,
+    pub ns: Option<i32>,
+    pub id: Option<i32>,
+    pub rev_id: Option<i32>,
+    pub rev_contrib_id: Option<i32>,
+    pub rev_text: String,
 }
 
 impl Page {
@@ -51,18 +67,7 @@ impl Page {
     }
 }
 
-pub struct State {
-    pub last_text_content: Option<String>,
-    pub ns_key: Option<i32>,
-    pub page: Page,
-
-    pub page_num: u64,
-    pub section_num: u64,
-
-    pub just_emitted_update: bool,
-}
-
-// Called with nothing quick-xml specific when each </page> closing tag has been read
+// Core wikitext parsing logic - called by process_pages
 
 fn parse_page_wikitext(
     page: &Page,           // page's data
@@ -97,13 +102,13 @@ fn parse_page_wikitext(
     // now split the text by the same regex
     let split_page_text = our_lang_headings_regex.split(&page.rev_text).collect::<Vec<&str>>();
 
-    let mut lang_sections_output_vec: Vec<String> = Vec::new();
+    let _lang_sections_output_vec: Vec<String> = Vec::new();
 
     // skip the prologue before the first heading, usually contains {{also}}
     for (i, lang_sec_text) in split_page_text.iter().enumerate().skip(1) {
         *section_num += 1;
 
-        let mut lang_section_output = languages[i - 1].clone();
+        let _lang_section_output = languages[i - 1].clone();
 
         // get everything after this heading
         let mut lang_sec_text = *lang_sec_text;
@@ -132,7 +137,7 @@ fn parse_page_wikitext(
 
         let split_section_text = our_headings_regex.split(&lang_sec_text).collect::<Vec<&str>>();
 
-        let mut heading_sections_output_vec: Vec<String> = Vec::new();
+        let _heading_sections_output_vec: Vec<String> = Vec::new();
 
         for (j, section_text) in split_section_text.iter().enumerate().skip(1) {
             // let lump = section_text.replace("\n", "\\n").chars().take(72).collect::<String>();
@@ -164,128 +169,4 @@ fn parse_page_wikitext(
     // }
 }
 
-/////////////// quick-xml stuff ///////////
 
-// Does one 'iteration' of the quick-xml loop.
-// This does not mean get the next page.
-// In the quick-xml case it means one 'Event'
-// Calls `end_page` when it gets to the </page> - calls with nothing quick-xml specific!
-
-pub fn qx_iterate(
-    opts: &Opts,
-    qx_reader: &mut Reader<StdinLock<'static>>,
-    qx_buffer: &mut Vec<u8>,
-    state: &mut State,
-) -> bool {
-    match qx_reader.read_event_into(qx_buffer) {
-        Ok(Event::Start(node)) => match node.name().as_ref() {
-            b"namespace" => qx_start_namespace(&node, &mut state.ns_key, &mut state.last_text_content),
-            b"page" => qx_start_page(&mut state.page),
-            b"title" => qx_start_page_title(&mut state.last_text_content),
-            b"ns" => qx_start_page_ns(&mut state.last_text_content, &mut state.page.ns),
-            b"id" => qx_start_id(&mut state.last_text_content),
-            b"text" => qx_start_page_rev_text(&mut state.last_text_content),
-            _ => {}
-        },
-        Ok(Event::Empty(node)) => {
-            if node.name().as_ref() == b"namespace" {
-                qx_start_namespace(&node, &mut state.ns_key, &mut state.last_text_content);
-                qx_end_namespace(state.ns_key, &state.last_text_content);
-            }
-        }
-        Ok(Event::End(node)) => match node.name().as_ref() {
-            b"namespace" => qx_end_namespace(state.ns_key, &state.last_text_content),
-            b"title" => qx_end_page_title(&mut state.page.title, &mut state.last_text_content),
-            b"ns" => qx_end_page_ns(&mut state.page.ns, &mut state.last_text_content),
-            b"id" => qx_end_id(&mut state.page, &mut state.last_text_content),
-            b"text" => qx_end_page_rev_text(&mut state.page.rev_text, &mut state.last_text_content),
-            b"page" => qx_end_page(opts, state),
-            _ => {}
-        },
-        Ok(Event::Text(text)) => {
-            let s = String::from_utf8(text.to_vec()).unwrap();
-            if let Some(ref mut last_text_content) = state.last_text_content {
-                last_text_content.push_str(&s);
-            } else {
-                state.last_text_content = Some(s);
-            }
-        }
-        Ok(Event::Eof) => return false,
-        Ok(_) => {}
-        Err(_error) => return false,
-    }
-
-    // Clear the buffer for the next event
-    qx_buffer.clear();
-    true
-}
-
-///// quick-xml implementation functions moved from main part of code
-
-// siteinfo/namespaces/namespace
-fn qx_start_namespace(node: &BytesStart, ns_key: &mut Option<i32>, last_text_content: &mut Option<String>) {
-    if let Some(att) = node.attributes().find(|a| a.as_ref().unwrap().key == QName(b"key")) {
-        *ns_key = Some(
-            String::from_utf8(att.unwrap().value.to_vec())
-                .unwrap()
-                .parse::<i32>()
-                .unwrap(),
-        );
-    }
-    *last_text_content = None; // Reset for each namespace
-}
-
-// siteinfo/namespaces/namespace
-fn qx_end_namespace(_ns_key: Option<i32>, last_text_content: &Option<String>) {
-    // The default namespace, 0, has no name
-    let _ns_text = last_text_content.as_ref().unwrap_or(&String::from("")).clone();
-}
-
-fn qx_start_page(page: &mut Page) {
-    *page = Page::new();
-}
-
-fn qx_end_page(opts: &Opts, state: &mut State) {
-    parse_page_wikitext(&state.page, &mut state.page_num, &mut state.section_num);
-}
-
-fn qx_start_page_title(last_text_content: &mut Option<String>) {
-    *last_text_content = None;
-}
-
-fn qx_end_page_title(page_title: &mut String, last_text_content: &mut Option<String>) {
-    *page_title = last_text_content.take().unwrap_or_default();
-}
-
-fn qx_start_page_ns(last_text_content: &mut Option<String>, page_ns: &mut Option<i32>) {
-    *page_ns = None;
-    *last_text_content = None;
-}
-
-fn qx_end_page_ns(page_ns: &mut Option<i32>, last_text_content: &mut Option<String>) {
-    let ns_text = last_text_content.take().unwrap_or_default();
-    *page_ns = ns_text.parse::<i32>().ok();
-}
-
-fn qx_start_id(last_text_content: &mut Option<String>) {
-    *last_text_content = None;
-}
-
-fn qx_end_id(page: &mut Page, last_text_content: &mut Option<String>) {
-    let id = last_text_content.take().unwrap_or_default().parse::<i32>().unwrap();
-    if page.id.is_none() {
-        page.id = Some(id);
-    } else if page.rev_id.is_none() {
-        page.rev_id = Some(id);
-    } else if page.rev_contrib_id.is_none() {
-        page.rev_contrib_id = Some(id);
-    }
-}
-
-fn qx_start_page_rev_text(last_text_content: &mut Option<String>) {
-    *last_text_content = None;
-}
-
-fn qx_end_page_rev_text(page_rev_text: &mut String, last_text_content: &mut Option<String>) {
-    *page_rev_text = last_text_content.take().unwrap_or_default();
-}
