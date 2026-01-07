@@ -210,14 +210,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let with_language = pattern_counts.values().map(|(c, _)| c).sum::<u32>();
     println!("L3 Section Order Pattern Analysis (v2 - structural)");
     println!("Language: {}", args.language);
-    println!("Total pages read: {} (all namespaces)", pages_processed);
+    println!("Total pages read: {}", pages_processed);
     println!("Pages with {} section: {}", args.language, with_language);
     println!("==================================================");
     println!();
 
     for (pattern, (count, examples)) in sorted.iter() {
-        let pct = (*count as f64 / with_language as f64) * 100.0;
-        println!("{:3}% ({:6} pages) - {:?}", pct as u32, count, pattern);
+        let pct_of_english = (*count as f64 / with_language as f64) * 100.0;
+        let pct_of_all = (*count as f64 / pages_processed as f64) * 100.0;
+        println!("{:5.2}% of {} | {:5.2}% of all | {:6} pages - {:?}", 
+                 pct_of_english, args.language, pct_of_all, count, pattern);
         println!("               Examples: {}", examples.join(", "));
         println!();
     }
