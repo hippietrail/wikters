@@ -23,3 +23,7 @@ path = "src/bin/etymology_pronunciation_analyzer.rs"
 [[bin]]
 name = "homograph_pattern_detector"
 path = "src/bin/homograph_pattern_detector.rs"
+
+[[bin]]
+name = "dump_raw_sections"
+path = "src/bin/dump_raw_sections.rs"
