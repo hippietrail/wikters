@@ -4,27 +4,36 @@ Empirical analysis of enwiktionary-20251101 dump (50,000 page sample).
 
 ## Executive Summary
 
-English sections have consistent structure but surprising diversity in ordering and nesting:
+English sections (n=172k, from 500k page sample) show clear patterns:
 
-- **44% Pronunciation-at-top-level** (homographs divided by shared Pronunciation)
-- **22% Etymology-then-Pronunciation** (sequential flat structure)
-- **20% Pronunciation-before-Etymology** (reverse order)
-- **5% Etymology-only**
-- **4% POS-only** (minimal, no metadata sections)
+- **11% PosOnly** - Minimal entries, no Etymology/Pronunciation
+- **9% EtymFlatThenPronFlat** - Most common structured entries
+- **5% EtymOnly** - Etymology without Pronunciation metadata
+- **3% PronOnly** - Standalone Pronunciation
+- **1% PronFlatThenEtymFlat** - Reverse order (rare)
+- **0.4% EtymWithNestedPron** - Etymology with L4:Pronunciation inside
+- **~0.1% edge cases** - No L3 sections, no structured content, etc.
+- **0% PronWithNestedEtym** - This pattern doesn't exist in the corpus
 
-**Key insight**: No single "correct" nesting—parser must handle multiple patterns efficiently via state machine, not hierarchical assumptions.
+**Key insight**: Two dominant patterns (PosOnly at 11%, EtymFlatThenPronFlat at 9%) handle 20% of entries. Rest are variations. Parser must handle nested and flat forms, but nesting is rare (0.4%).
 
 ## Detailed Findings by Pattern
 
-### L3 Section Ordering (of pages with English sections, n≈22k)
+### L3 Section Ordering (of pages with English sections, n≈172k, on 500k page sample)
 
-| Pattern | Count | % | Examples | Pattern Type |
-|---------|-------|---|----------|---|
-| **EtymologyBeforePronunciation** | 11,467 | 22% | dictionary, thesaurus, encyclopedia | L3:Etymology → L3:Pronunciation → L3:POS |
-| **PronunciationBeforeEtymology** | 2,193 | 4% | free, portmanteau, cat, word | L3:Pronunciation → L3:Etymology → L4:POS |
-| **OnlyEtymology** | 2,738 | 5% | A, raven, July | L3:Etymology only (or with L4:Pronunciation inside) |
-| **OnlyPronunciation** | 1,524 | 3% | GDP, pies, GNU FDL | L3:Pronunciation only, no Etymology |
-| **PosOnly** | 2,274 | 4% | apples and pears, A 1, aard-vark | L3:POS only, bare minimum |
+| Pattern | Count | % | Examples | Structure |
+|---------|-------|---|----------|-----------|
+| **PosOnly** | 56,658 | 11% | apples and pears, A 1, aard-vark | Only L3:POS, no Etymology/Pronunciation |
+| **EtymFlatThenPronFlat** | 48,059 | 9% | dictionary, thesaurus, encyclopedia | L3:Etymology → L3:Pronunciation (sequential) |
+| **EtymOnly** | 28,609 | 5% | Pope Julius, portmanteau word, ab- | L3:Etymology only (may have L4:Pronunciation inside) |
+| **PronOnly** | 16,556 | 3% | GDP, pies, GNU FDL, current events | L3:Pronunciation only |
+| **PronFlatThenEtymFlat** | 5,120 | 1% | free, portmanteau, cat, word | L3:Pronunciation → L3:Etymology (reverse order) |
+| **EtymWithNestedPron** | 1,950 | 0.4% | A, raven, July, minute | L3:Etymology with L4:Pronunciation inside |
+| **Other (no_etym_pron_pos)** | 427 | 0.1% | ik, ttyl, RTFM, YMMV | Edge case: no etymology/pronunciation/POS |
+| **Other (no_l3)** | 50 | 0.01% | abnodate, abnodation | Edge case: no L3 sections at all |
+| **EtymFlatThenPronNested** | 1 | 0.002% | de | Very rare: unclear what this means |
+| **PronFlatThenEtymNested** | 1 | 0.002% | pull-up | Very rare: unclear what this means |
+| **PronWithNestedEtym** | 0 | 0% | - | **Does not exist in corpus** |
 
 ### L4 Heading Patterns (nested under L3, top 20)
 

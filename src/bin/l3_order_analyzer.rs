@@ -97,13 +97,39 @@ fn is_pos_section(text: &str) -> bool {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum OrderPattern {
-    EtymologyBeforePronunciation, // ===Etymology=== then ===Pronunciation===
-    PronunciationBeforeEtymology, // ===Pronunciation=== then ===Etymology===
-    OnlyEtymology,
-    OnlyPronunciation,
-    EitherBeforePOS,              // Both before any L3:POS
-    PosOnly,                       // Only L3:POS, no Etymology/Pronunciation
+    EtymFlatThenPronFlat,          // L3:Etym → L3:Pron (both sequential)
+    PronFlatThenEtymFlat,          // L3:Pron → L3:Etym (both sequential)
+    EtymFlatThenPronNested,        // L3:Etym → L3:Pron with L4:Pron under Etym
+    PronFlatThenEtymNested,        // L3:Pron → L3:Etym with L4:Pron or L4:Etym under Pron
+    EtymWithNestedPron,            // L3:Etym with L4:Pron inside (no L3:Pron)
+    PronWithNestedEtym,            // L3:Pron with L4:Etym inside (no L3:Etym)
+    EtymOnly,                      // L3:Etym only
+    PronOnly,                      // L3:Pron only
+    PosOnly,                       // Only L3:POS
     Other(String),
+}
+
+fn has_nested_l4(lines: &[&str], l3_start: usize, l3_end: usize, section_type: &str) -> bool {
+    for i in l3_start + 1..l3_end {
+        let trimmed = lines[i].trim();
+        if !is_valid_heading(trimmed) {
+            continue;
+        }
+        let level = count_leading_equals(trimmed);
+        if level == 3 {
+            break; // Next L3 section
+        }
+        if level == 4 {
+            let heading_text = get_heading_text(lines[i]);
+            if section_type == "Pronunciation" && is_pronunciation_section(&heading_text) {
+                return true;
+            }
+            if section_type == "Etymology" && is_etymology_section(&heading_text) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn get_l3_order_pattern(text: &str, language: &str) -> OrderPattern {
@@ -113,29 +139,38 @@ fn get_l3_order_pattern(text: &str, language: &str) -> OrderPattern {
         None => return OrderPattern::Other(format!("no_{}", language.to_lowercase())),
     };
 
-    let mut l3_sections: Vec<(usize, String)> = Vec::new();
+    let mut l3_sections: Vec<(usize, usize, String)> = Vec::new(); // (line_start, line_end, text)
 
     for i in start + 1..end {
-        let line = lines[i];
-        let trimmed = line.trim();
+        let trimmed = lines[i].trim();
         
         if !is_valid_heading(trimmed) || count_leading_equals(trimmed) != 3 {
             continue;
         }
 
-        let heading_text = get_heading_text(line);
-        l3_sections.push((i, heading_text));
+        let heading_text = get_heading_text(lines[i]);
+        l3_sections.push((i, 0, heading_text)); // end calculated below
     }
 
     if l3_sections.is_empty() {
         return OrderPattern::Other("no_l3".to_string());
     }
 
+    // Calculate end line for each L3 section
+    for i in 0..l3_sections.len() {
+        let next_l3_line = if i + 1 < l3_sections.len() {
+            l3_sections[i + 1].0
+        } else {
+            end
+        };
+        l3_sections[i].1 = next_l3_line;
+    }
+
     let mut etymology_idx = None;
     let mut pronunciation_idx = None;
     let mut pos_idx = None;
 
-    for (idx, (_, text)) in l3_sections.iter().enumerate() {
+    for (idx, (_, _, text)) in l3_sections.iter().enumerate() {
         if is_etymology_section(text) && etymology_idx.is_none() {
             etymology_idx = Some(idx);
         }
@@ -147,18 +182,59 @@ fn get_l3_order_pattern(text: &str, language: &str) -> OrderPattern {
         }
     }
 
-    match (etymology_idx, pronunciation_idx, pos_idx) {
-        (Some(e), Some(p), _) => {
+    match (etymology_idx, pronunciation_idx) {
+        (Some(e), Some(p)) => {
+            // Both exist at L3 - check for nesting
+            let (etym_start, etym_end, _) = l3_sections[e];
+            let (pron_start, pron_end, _) = l3_sections[p];
+            
+            let etym_has_nested_pron = has_nested_l4(&lines, etym_start, etym_end, "Pronunciation");
+            let pron_has_nested_etym = has_nested_l4(&lines, pron_start, pron_end, "Etymology");
+            
             if e < p {
-                OrderPattern::EtymologyBeforePronunciation
+                // Etymology before Pronunciation
+                if etym_has_nested_pron {
+                    OrderPattern::EtymFlatThenPronNested
+                } else {
+                    OrderPattern::EtymFlatThenPronFlat
+                }
             } else {
-                OrderPattern::PronunciationBeforeEtymology
+                // Pronunciation before Etymology
+                if pron_has_nested_etym {
+                    OrderPattern::PronFlatThenEtymNested
+                } else {
+                    OrderPattern::PronFlatThenEtymFlat
+                }
             }
         }
-        (Some(_), None, _) => OrderPattern::OnlyEtymology,
-        (None, Some(_), _) => OrderPattern::OnlyPronunciation,
-        (None, None, Some(_)) => OrderPattern::PosOnly,
-        _ => OrderPattern::Other("other".to_string()),
+        (Some(e), None) => {
+            // Only Etymology at L3
+            let (etym_start, etym_end, _) = l3_sections[e];
+            let etym_has_nested_pron = has_nested_l4(&lines, etym_start, etym_end, "Pronunciation");
+            if etym_has_nested_pron {
+                OrderPattern::EtymWithNestedPron
+            } else {
+                OrderPattern::EtymOnly
+            }
+        }
+        (None, Some(p)) => {
+            // Only Pronunciation at L3
+            let (pron_start, pron_end, _) = l3_sections[p];
+            let pron_has_nested_etym = has_nested_l4(&lines, pron_start, pron_end, "Etymology");
+            if pron_has_nested_etym {
+                OrderPattern::PronWithNestedEtym
+            } else {
+                OrderPattern::PronOnly
+            }
+        }
+        (None, None) => {
+            // Neither Etymology nor Pronunciation
+            if pos_idx.is_some() {
+                OrderPattern::PosOnly
+            } else {
+                OrderPattern::Other("no_etym_pron_pos".to_string())
+            }
+        }
     }
 }
 
