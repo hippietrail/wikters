@@ -4,6 +4,7 @@ use std::io;
 use clap::Parser;
 
 use wikters::regex_reader::RegexReader;
+use wikters::string_ops_reader::StringOpsReader;
 use wikters::quick_xml_reader::QuickXmlReader;
 use wikters::process_pages;
 use wikters::Opts;
@@ -27,9 +28,13 @@ pub struct Args {
     #[clap(short, long)]
     pub sample_rate: Option<u64>,
 
-    /// Use hand-rolled parser instead of quick-xml.
+    /// Use regex-based hand-rolled parser instead of quick-xml.
     #[clap(short = 'r', long)]
     pub handrolled: bool,
+
+    /// Use string-ops hand-rolled parser instead of quick-xml.
+    #[clap(short = 's', long)]
+    pub stringops: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -46,7 +51,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let stdin = io::stdin();
 
     // Choose reader implementation based on command line argument
-    let source: Box<dyn wikters::PageSource> = if args.handrolled {
+    let source: Box<dyn wikters::PageSource> = if args.stringops {
+        Box::new(StringOpsReader::new(stdin.lock()))
+    } else if args.handrolled {
         Box::new(RegexReader::new(stdin.lock()))
     } else {
         Box::new(QuickXmlReader::new(stdin.lock()))
