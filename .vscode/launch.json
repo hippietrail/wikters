@@ -1,0 +1,50 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'wikipedia'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=wikipedia",
+          "--package=wikipedia"
+        ],
+        "filter": {
+          "name": "wikipedia",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'wikipedia'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=wikipedia",
+          "--package=wikipedia"
+        ],
+        "filter": {
+          "name": "wikipedia",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": ".",
+      "program": "build/Debug/outDebug"
+    }
+  ]
+}
