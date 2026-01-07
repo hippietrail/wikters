@@ -2,7 +2,7 @@ use std::error::Error;
 
 mod heading_and_template_lists;
 
-pub mod handrolled;
+pub mod regex_reader;
 pub mod quick_xml_reader;
 pub mod wikitext_parser;
 

@@ -3,7 +3,7 @@ use std::io::BufRead;
 
 use crate::{Page, PageSource};
 
-pub struct HandRolledReader<R: BufRead> {
+pub struct RegexReader<R: BufRead> {
     lines: std::io::Lines<R>,
     state: State,
     title: Option<String>,
@@ -30,9 +30,9 @@ enum State {
     InRevisionText,
 }
 
-impl<R: BufRead> HandRolledReader<R> {
+impl<R: BufRead> RegexReader<R> {
     pub fn new(reader: R) -> Self {
-        HandRolledReader {
+        RegexReader {
             lines: reader.lines(),
             state: State::PrePage,
             title: None,
@@ -43,7 +43,7 @@ impl<R: BufRead> HandRolledReader<R> {
     }
 }
 
-impl<R: BufRead> PageSource for HandRolledReader<R> {
+impl<R: BufRead> PageSource for RegexReader<R> {
     fn next_page(&mut self) -> Result<Option<Page>, Box<dyn Error>> {
         loop {
             let line = match self.lines.next() {

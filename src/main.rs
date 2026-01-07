@@ -3,7 +3,7 @@ use std::io;
 
 use clap::Parser;
 
-use wikters::handrolled::HandRolledReader;
+use wikters::regex_reader::RegexReader;
 use wikters::quick_xml_reader::QuickXmlReader;
 use wikters::process_pages;
 use wikters::Opts;
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Choose reader implementation based on command line argument
     let source: Box<dyn wikters::PageSource> = if args.handrolled {
-        Box::new(HandRolledReader::new(stdin.lock()))
+        Box::new(RegexReader::new(stdin.lock()))
     } else {
         Box::new(QuickXmlReader::new(stdin.lock()))
     };
