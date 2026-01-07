@@ -7,3 +7,19 @@ edition = "2021"
 clap = { version = "4.5.29", features = ["derive"] }
 quick-xml = "0.38.3"
 regex = "1.11.1"
+
+[[bin]]
+name = "template_inspector"
+path = "src/bin/template_inspector.rs"
+
+[[bin]]
+name = "section_structure_inspector"
+path = "src/bin/section_structure_inspector.rs"
+
+[[bin]]
+name = "etymology_pronunciation_analyzer"
+path = "src/bin/etymology_pronunciation_analyzer.rs"
+
+[[bin]]
+name = "homograph_pattern_detector"
+path = "src/bin/homograph_pattern_detector.rs"

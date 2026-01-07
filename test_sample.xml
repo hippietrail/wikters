@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mediawiki xmlns="http://www.mediawiki.org/xml/export-0.10/">
+  <page>
+    <title>test</title>
+    <ns>0</ns>
+    <revision>
+      <text>Some prologue text here.
+
+==English==
+
+===Etymology===
+
+====Noun====
+Definition of noun.
+
+====Verb====
+Definition of verb.
+
+===Pronunciation===
+The pronunciation.
+
+===Adjective===
+Definition of adjective.
+
+==Spanish==
+
+===Sustantivo===
+Spanish noun.
+</text>
+    </revision>
+  </page>
+  <page>
+    <title>run</title>
+    <ns>0</ns>
+    <revision>
+      <text>==English==
+
+===Etymology 1===
+
+====Noun====
+A running motion.
+
+====Verb====
+To move quickly.
+
+===Etymology 2===
+
+====Noun====
+A ladder rung.
+
+==French==
+Something here.
+</text>
+    </revision>
+  </page>
+  <page>
+    <title>bank</title>
+    <ns>0</ns>
+    <revision>
+      <text>==English==
+
+===Pronunciation===
+
+====Etymology====
+Related to bench.
+
+===Noun===
+A financial institution or the side of a river.
+
+===Verb===
+To deposit money.
+
+==German==
+Some content.
+</text>
+    </revision>
+  </page>
+</mediawiki>
