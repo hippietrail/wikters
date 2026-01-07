@@ -43,3 +43,7 @@ path = "src/bin/l3_order_analyzer.rs"
 [[bin]]
 name = "l3_order_analyzer_v2"
 path = "src/bin/l3_order_analyzer_v2.rs"
+
+[[bin]]
+name = "show_entry_tree"
+path = "src/bin/show_entry_tree.rs"
