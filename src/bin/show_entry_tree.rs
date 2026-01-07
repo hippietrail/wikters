@@ -14,31 +14,13 @@ struct Args {
     #[clap(short, long)]
     title: String,
 
-    /// Show content preview (first N chars under each heading)
-    #[clap(short, long, default_value = "0")]
-    preview: usize,
-}
+    /// Only show English section (optionally with Translingual)
+    #[clap(short, long)]
+    main_only: bool,
 
-fn print_tree(headings: &[Heading], content_chunks: &[String], start: usize, end: usize, indent: usize) {
-    for i in start..end {
-        let heading = &headings[i];
-        let prefix = "  ".repeat(indent);
-        let content = &content_chunks[i + 1];
-        
-        let preview = if content.is_empty() {
-            String::new()
-        } else {
-            let trimmed = content.trim();
-            let first_line = trimmed.lines().next().unwrap_or("");
-            if first_line.len() > 50 {
-                format!(" → \"{}...\"", &first_line[..50])
-            } else {
-                format!(" → \"{}\"", first_line)
-            }
-        };
-        
-        println!("{}{}{}", prefix, heading, preview);
-    }
+    /// Include Translingual section with English (only with --main-only)
+    #[clap(short, long)]
+    with_translingual: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -53,35 +35,64 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(page) => {
                 if page.title == args.title {
                     println!("Found: {}", page.title);
-                    println!("Namespace: {}", page.ns.unwrap_or(-1));
                     println!();
 
                     let (headings, content_chunks) = wikitext_splitter::split_by_headings(&page.rev_text);
 
-                    println!("Full structure ({} headings):", headings.len());
-                    println!("==================================================");
-                    
-                    // Show all headings with their nesting
-                    for (i, heading) in headings.iter().enumerate() {
-                        let indent = if heading.level >= 2 { heading.level - 2 } else { 0 };
-                        let content = &content_chunks[i + 1];
-                        
-                        let preview = if args.preview > 0 && !content.is_empty() {
-                            let trimmed = content.trim();
-                            let first_line = trimmed.lines().next().unwrap_or("");
-                            if first_line.is_empty() {
-                                String::new()
-                            } else {
-                                let preview_len = args.preview.min(first_line.len());
-                                format!(" → \"{}\"", &first_line[..preview_len])
+                    if args.main_only {
+                        // Show only English (and optionally Translingual)
+                        let mut sections_shown = false;
+
+                        for (i, heading) in headings.iter().enumerate() {
+                            if heading.level != 2 {
+                                continue;
                             }
-                        } else {
-                            String::new()
-                        };
-                        
-                        println!("{}{}{}", "  ".repeat(indent), heading, preview);
+
+                            let show = heading.text == "English"
+                                || (args.with_translingual && heading.text == "Translingual");
+
+                            if !show {
+                                continue;
+                            }
+
+                            if sections_shown {
+                                println!();
+                            }
+
+                            println!("{}:", heading.text);
+                            println!("==================================================");
+
+                            // Find next L2 section
+                            let next_l2 = headings[i + 1..]
+                                .iter()
+                                .position(|h| h.level == 2)
+                                .map(|p| p + i + 1)
+                                .unwrap_or(headings.len());
+
+                            // Show this section's headings
+                            for j in (i + 1)..next_l2 {
+                                let h = &headings[j];
+                                let indent = if h.level >= 2 { h.level - 2 } else { 0 };
+                                println!("{}{}", "  ".repeat(indent), h);
+                            }
+
+                            sections_shown = true;
+                        }
+                    } else {
+                        // Show full structure
+                        println!("Full structure ({} headings):", headings.len());
+                        println!("==================================================");
+
+                        for heading in headings.iter() {
+                            let indent = if heading.level >= 2 {
+                                heading.level - 2
+                            } else {
+                                0
+                            };
+                            println!("{}{}", "  ".repeat(indent), heading);
+                        }
                     }
-                    
+
                     return Ok(());
                 }
             }
