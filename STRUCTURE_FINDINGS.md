@@ -92,6 +92,80 @@ Most common high-level patterns (first-level sections after ==English==):
 3. **Be defensive about dividers**: Don't assume Etymology is always the homograph divider—Pronunciation can be too
 4. **Separate concerns**: Don't try to handle all 1800+ unique heading patterns—extract structure flexibly, validate on-demand
 
+## Visual Inspection Findings
+
+### "free" (Pronunciation-Divided Homograph)
+The dominant pattern (44% of pages). Structure:
+```
+==English==
+===Pronunciation===
+* Shared pronunciation rules
+===Etymology 1===
+  From ...
+====Adjective====
+  Definition 1...
+====Verb====
+  Definition 1...
+===Etymology 2===
+  From ...
+====Adjective====
+  Definition 2...
+```
+
+Key insight: **Pronunciation sections are shared across homographs**, not nested inside Etymology. Each Etymology then has its own POS sections (L4:Adjective, L4:Verb, etc.).
+
+### "July" (Multiple Etymologies with Nested POS)
+The rarer nested pattern (1% of pages). Structure:
+```
+==English==
+===Etymology 1===
+====Pronunciation====
+  Pronunciation for sense 1
+====Proper noun====
+  Definition 1
+=====Derived terms=====
+  ...
+===Etymology 2===
+====Pronunciation====
+  Pronunciation for sense 2
+====Proper noun====
+  Definition 2
+```
+
+Key insight: **When nested, Pronunciation goes inside Etymology** (L4), and POS (L4) follows at same level.
+
+### "dictionary" (Flat POS, No Etymology)
+The simple pattern (4% of pages). Structure:
+```
+==English==
+===Etymology===
+From ...
+===Pronunciation===
+* IPA ...
+===Noun===
+  Definition...
+```
+
+Key insight: No multiple senses, no complex nesting. Etymology and Pronunciation are sequential L3 headers, followed by L3 POS headers.
+
+### "apples and pears" (Minimal)
+Ultra-simple (subset of FlatPos). Just:
+```
+==English==
+===Noun===
+Definition...
+```
+
+No Etymology, no Pronunciation at all.
+
+## Parser Design Implications
+
+1. **Don't assume nesting levels**—both L3→L4 and L3→L3 appear
+2. **Pronunciation can be a top-level divider** (not always inside Etymology)
+3. **Shared sections exist**—Pronunciation can apply to multiple etymologies
+4. **Lazy extraction principle holds**—skip to relevant section, don't parse full hierarchy
+5. **State machine is key**—move through section types at different levels, extract on demand
+
 ## Next Steps
 
 These discovery tools can be used to:
@@ -99,6 +173,7 @@ These discovery tools can be used to:
 - Detect new edge cases as the dump evolves
 - Validate parser correctness (can identify which patterns a parser handles)
 - Monitor for "gatekeeping" variations by language (compare English to other languages)
+- Develop targeted parsers for dominant patterns first (Pronunciation-divided at 44%)
 
 ## Running the Tools
 
@@ -111,4 +186,8 @@ bzcat dump.xml.bz2 | cargo run --release --bin etymology_pronunciation_analyzer 
 
 # Homograph pattern classification
 bzcat dump.xml.bz2 | cargo run --release --bin homograph_pattern_detector --limit 50000 --examples
+
+# Dump raw wikitext for manual inspection
+bzcat dump.xml.bz2 | cargo run --release --bin dump_raw_sections --pages-to-show 20
+bzcat dump.xml.bz2 | cargo run --release --bin dump_raw_sections --title-filter "july"
 ```
