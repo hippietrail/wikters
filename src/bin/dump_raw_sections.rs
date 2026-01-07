@@ -13,22 +13,27 @@ struct Args {
     #[clap(short, long)]
     limit: Option<u64>,
 
-    /// Show first N pages with English sections (shows raw wikitext)
+    /// Show first N pages with matching language sections (shows raw wikitext)
     #[clap(short, long, default_value = "20")]
     pages_to_show: u64,
+
+    /// Language section to extract (default: English)
+    #[clap(long, default_value = "English")]
+    language: String,
 
     /// Filter by title substring (case-insensitive)
     #[clap(long)]
     title_filter: Option<String>,
 }
 
-fn get_english_section(text: &str) -> Option<String> {
+fn get_language_section(text: &str, language: &str) -> Option<String> {
     let lines: Vec<_> = text.lines().collect();
     
-    // Find ==English==
+    // Find ==Language==
     let start = lines.iter().position(|line| {
         let trimmed = line.trim();
-        trimmed == "==English==" || trimmed.starts_with("==English==")
+        let lang_heading = format!("=={language}==");
+        trimmed == lang_heading || trimmed.starts_with(&lang_heading)
     })?;
 
     // Find next L2 heading (==SomeLanguage==)
@@ -91,10 +96,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        if let Some(english_section) = get_english_section(&page_result.rev_text) {
+        if let Some(language_section) = get_language_section(&page_result.rev_text, &args.language) {
             shown += 1;
             println!("=== {} ===", page_result.title);
-            println!("{}", english_section);
+            println!("{}", language_section);
             println!();
         }
     }

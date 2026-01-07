@@ -16,6 +16,14 @@ struct Args {
     #[clap(short, long)]
     limit: Option<u64>,
 
+    /// Language to analyze (default: English)
+    #[clap(long, default_value = "English")]
+    language: String,
+
+    /// Also include Translingual sections
+    #[clap(long)]
+    with_translingual: bool,
+
     /// Use regex-based hand-rolled parser
     #[clap(short = 'r', long)]
     handrolled: bool,
@@ -24,7 +32,7 @@ struct Args {
     #[clap(short = 's', long)]
     stringops: bool,
 
-    /// Store examples to JSON file (use - for stdout)
+    /// Store examples to markdown file (use - for stdout)
     #[clap(long)]
     output_examples: Option<String>,
 }
@@ -47,26 +55,26 @@ fn get_heading_text(line: &str) -> String {
     trimmed[leading..trimmed.len() - trailing].trim().to_string()
 }
 
-fn get_english_section(text: &str) -> Option<(usize, usize)> {
+fn get_language_section(text: &str, language: &str) -> Option<(usize, usize)> {
     let lines: Vec<_> = text.lines().collect();
     
-    let english_start = lines.iter().position(|line| {
+    let start = lines.iter().position(|line| {
         let trimmed = line.trim();
         is_valid_heading(trimmed) && 
         count_leading_equals(trimmed) == 2 &&
-        trimmed.contains("English")
+        trimmed.contains(language)
     })?;
 
-    let english_end = lines[english_start + 1..]
+    let end = lines[start + 1..]
         .iter()
         .position(|line| {
             let trimmed = line.trim();
             is_valid_heading(trimmed) && count_leading_equals(trimmed) == 2
         })
-        .map(|p| p + english_start + 1)
+        .map(|p| p + start + 1)
         .unwrap_or(lines.len());
 
-    Some((english_start, english_end))
+    Some((start, end))
 }
 
 fn is_etymology_section(text: &str) -> bool {
@@ -98,11 +106,11 @@ enum OrderPattern {
     Other(String),
 }
 
-fn get_l3_order_pattern(text: &str) -> OrderPattern {
+fn get_l3_order_pattern(text: &str, language: &str) -> OrderPattern {
     let lines: Vec<_> = text.lines().collect();
-    let (start, end) = match get_english_section(text) {
+    let (start, end) = match get_language_section(text, language) {
         Some(range) => range,
-        None => return OrderPattern::Other("no_english".to_string()),
+        None => return OrderPattern::Other(format!("no_{}", language.to_lowercase())),
     };
 
     let mut l3_sections: Vec<(usize, String)> = Vec::new();
@@ -194,11 +202,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
 
-                let pattern = get_l3_order_pattern(&page.rev_text);
-                let entry = pattern_counts.entry(pattern).or_insert((0, Vec::new()));
-                entry.0 += 1;
-                if entry.1.len() < 4 {
-                    entry.1.push(page.title.clone());
+                let mut patterns_found = vec![];
+                
+                // Analyze requested language
+                patterns_found.push(get_l3_order_pattern(&page.rev_text, &args.language));
+                
+                // Optionally analyze Translingual
+                if args.with_translingual {
+                    patterns_found.push(get_l3_order_pattern(&page.rev_text, "Translingual"));
+                }
+                
+                for pattern in patterns_found {
+                    let entry = pattern_counts.entry(pattern).or_insert((0, Vec::new()));
+                    entry.0 += 1;
+                    if entry.1.len() < 4 {
+                        entry.1.push(page.title.clone());
+                    }
                 }
             }
             None => break,
@@ -209,6 +228,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     sorted.sort_by(|a, b| b.1.0.cmp(&a.1.0));
 
     println!("L3 Section Order Pattern Analysis");
+    println!("Language: {}{}", args.language, if args.with_translingual { " + Translingual" } else { "" });
     println!("({} pages scanned)", pages_processed);
     println!("==================================================");
     println!();
