@@ -39,3 +39,7 @@ path = "src/bin/pronunciation_nesting_analyzer.rs"
 [[bin]]
 name = "l3_order_analyzer"
 path = "src/bin/l3_order_analyzer.rs"
+
+[[bin]]
+name = "l3_order_analyzer_v2"
+path = "src/bin/l3_order_analyzer_v2.rs"

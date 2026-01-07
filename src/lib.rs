@@ -6,6 +6,7 @@ pub mod regex_reader;
 pub mod string_ops_reader;
 pub mod quick_xml_reader;
 pub mod wikitext_parser;
+pub mod wikitext_splitter;
 
 /// Trait for XML dump readers - produces pages from MediaWiki XML
 pub trait PageSource {
