@@ -8,14 +8,14 @@ English sections (n=172k, from 500k page sample) show clear patterns:
 
 - **11% PosOnly** - Minimal entries, no Etymology/Pronunciation
 - **9% EtymFlatThenPronFlat** - Most common structured entries
-- **5% EtymOnly** - Etymology without Pronunciation metadata
+- **5% EtymOnly** - Etymology without nested POS
 - **3% PronOnly** - Standalone Pronunciation
 - **1% PronFlatThenEtymFlat** - Reverse order (rare)
-- **0.4% EtymWithNestedPron** - Etymology with L4:Pronunciation inside
+- **0.4% EtymWithNestedPron** - Etymology with L4:POS inside (homographs) *(likely to increase with corrected detection)*
 - **~0.1% edge cases** - No L3 sections, no structured content, etc.
 - **0% PronWithNestedEtym** - This pattern doesn't exist in the corpus
 
-**Key insight**: Two dominant patterns (PosOnly at 11%, EtymFlatThenPronFlat at 9%) handle 20% of entries. Rest are variations. Parser must handle nested and flat forms, but nesting is rare (0.4%).
+**Key insight**: Two dominant patterns (PosOnly at 11%, EtymFlatThenPronFlat at 9%) handle 20% of entries. Rest are variations. Parser must handle nested and flat forms. Note: The EtymWithNestedPron detection was originally checking for L4:Pronunciation nesting; it now correctly checks for L4:POS nesting (the real homograph indicator). This should increase the frequency significantly when re-analyzed.
 
 ## Detailed Findings by Pattern
 
@@ -43,13 +43,13 @@ Most L4 sections are content metadata, not structural dividers:
 |---------|-------|-------------------|-------|
 | **Translations** | 15,590 | Noun, Verb, Adjective | Most common L4 section |
 | **Derived terms** | 10,904 | Noun, Adjective, Verb | Second most common |
-| **Noun** | 5,671 | Etymology | POS nested under Etymology |
+| **Noun** | 5,671 | Etymology | **Homograph indicator: L4:POS under L3:Etymology** |
 | **Related terms** | 4,954 | Noun, Adjective | Content subsection |
 | **Synonyms** | 4,296 | Noun, Adjective, Verb | Content subsection |
-| **Verb** | 2,955 | Etymology | POS nested under Etymology |
-| **Pronunciation** | 1,350 | Etymology | **Per-etymology pronunciation details** |
+| **Verb** | 2,955 | Etymology | **Homograph indicator: L4:POS under L3:Etymology** |
+| **Pronunciation** | 1,350 | Etymology | Per-etymology pronunciation details |
 
-**Critical finding**: ====Pronunciation==== under ===Etymology=== (1,350 occurrences) is significant, not rare. Each etymology can have its own pronunciation specifications (different for homographs/different word senses).
+**Critical finding**: The presence of **L4:POS (Noun, Verb, etc.) under L3:Etymology** (8,626 combined) is what indicates homographs with nested structure. The original detection was looking for L4:Pronunciation under L3:Etymology, which only showed 1,350 cases. The corrected detector now checks for L4:POS nesting, which better captures the actual homograph pattern (Etymology 1 → Noun, Etymology 2 → Noun, etc.).
 
 ### Pronunciation Nesting Patterns
 
@@ -100,23 +100,28 @@ Definition
 
 Key: Sequential L3 sections, flat structure, no nesting.
 
-#### "July" - OnlyEtymology (5%, with nested Pronunciation)
+#### "July" - EtymWithNestedPron (Homographs with nested POS)
 ```
 ==English==
+===Etymology 1===
+====Proper noun====
+  Definition 1
+
+===Etymology 2===
+====Proper noun====
+  Definition 2
+```
+
+Or with pronunciation per etymology:
+```
 ===Etymology 1===
 ====Pronunciation====
   Pronunciation for sense 1
 ====Proper noun====
   Definition 1
-
-===Etymology 2===
-====Pronunciation====
-  Pronunciation for sense 2
-====Proper noun====
-  Definition 2
 ```
 
-Key: Each Etymology has own L4:Pronunciation and L4:POS.
+Key: Each Etymology has own L4:POS (and optionally L4:Pronunciation). The presence of L4:POS under L3:Etymology indicates homographs with separate senses.
 
 #### "apples and pears" - PosOnly (4%)
 ```
@@ -179,6 +184,7 @@ bzcat dump.xml.bz2 | cargo run --release --bin dump_raw_sections --title-filter 
 3. **Non-article namespaces**: ~55% of pages in dump are not in namespace 0 (articles)
 4. **Edge cases exist**: Some pages have 5-10+ etymologies (words like "a", "be", "do")
 5. **Minimal entries**: Some entries skip all metadata sections
+6. **Detection correction**: Original nesting detection checked for L4:Pronunciation under L3:Etymology (only 1,350 cases). Corrected detector now checks for **L4:POS under L3:Etymology** (8,626+ cases), which properly identifies homograph structures. The 0.4% EtymWithNestedPron frequency is expected to increase significantly upon re-analysis.
 
 ## Future Investigation
 
