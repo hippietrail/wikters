@@ -27,3 +27,11 @@ path = "src/bin/homograph_pattern_detector.rs"
 [[bin]]
 name = "dump_raw_sections"
 path = "src/bin/dump_raw_sections.rs"
+
+[[bin]]
+name = "level4_heading_analyzer"
+path = "src/bin/level4_heading_analyzer.rs"
+
+[[bin]]
+name = "pronunciation_nesting_analyzer"
+path = "src/bin/pronunciation_nesting_analyzer.rs"
