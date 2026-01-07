@@ -127,10 +127,6 @@ fn has_nested_l4(lines: &[&str], l3_start: usize, l3_end: usize, section_type: &
             if section_type == "Etymology" && is_etymology_section(&heading_text) {
                 return true;
             }
-            // Check for POS sections nested under Etymology - this indicates homographs
-            if section_type == "POS" && is_pos_section(&heading_text) {
-                return true;
-            }
         }
     }
     false
@@ -212,11 +208,11 @@ fn get_l3_order_pattern(text: &str, language: &str) -> OrderPattern {
             }
         }
         (Some(e), None) => {
-            // Only Etymology at L3 - check if it has nested POS (homographs with multiple senses)
+            // Only Etymology at L3
             let (etym_start, etym_end, _) = l3_sections[e];
-            let etym_has_nested_pos = has_nested_l4(&lines, etym_start, etym_end, "POS");
-            if etym_has_nested_pos {
-                OrderPattern::EtymWithNestedPron // Indicates homograph structure
+            let etym_has_nested_pron = has_nested_l4(&lines, etym_start, etym_end, "Pronunciation");
+            if etym_has_nested_pron {
+                OrderPattern::EtymWithNestedPron
             } else {
                 OrderPattern::EtymOnly
             }
